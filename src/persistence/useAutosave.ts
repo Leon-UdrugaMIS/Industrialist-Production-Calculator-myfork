@@ -3,9 +3,13 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { useUIStore } from '../stores/useUIStore';
 import { useGlobalSettingsStore } from '../stores/useGlobalSettingsStore';
 import { getAutosave } from './idb';
-import { deserializeCanvas } from './transformer';
+import { applySaveSettings, deserializeCanvas } from './transformer';
 import { getAutosaveTabId } from './autosaveIdentity';
-import { saveCurrentAutosave } from './autosaveWriter';
+import {
+  markStartupAutosaveLoadComplete,
+  preserveAutosaveAfterLoadFailure,
+  saveCurrentAutosave,
+} from './autosaveWriter';
 
 let startupAutosavePromise: ReturnType<typeof getAutosave> | null = null;
 
@@ -21,9 +25,31 @@ export function useAutosave(): void {
       .then(async (record) => {
         if (!isMounted) return;
         if (record && record.data) {
+          let canvas: ReturnType<typeof deserializeCanvas>;
+          try {
+            canvas = deserializeCanvas(record.data);
+          } catch (error) {
+            const tabId = getAutosaveTabId();
+            const preservedSeparateSlot =
+              record.id !== tabId || preserveAutosaveAfterLoadFailure(tabId);
+            const detail =
+              error instanceof Error ? error.message : 'The save data could not be validated.';
+            const nextStep = preservedSeparateSlot
+              ? 'The original autosave remains unchanged. New changes in this tab will use a separate autosave slot.'
+              : 'The original autosave remains unchanged, but this browser could not create a separate slot, so autosaving is paused for this session.';
+            await useUIStore.getState().confirm({
+              title: 'AUTOSAVE COULD NOT BE LOADED',
+              message: `${detail}\n\n${nextStep}`,
+              confirmLabel: 'CONTINUE',
+              showCancel: false,
+              intent: 'error',
+            });
+            return;
+          }
+
           const currentStore = useFlowStore.getState();
           if (currentStore.nodes.length === 0 && currentStore.edges.length === 0) {
-            const { nodes, edges } = deserializeCanvas(record.data);
+            const { nodes, edges, globalSettings } = canvas;
 
             if (nodes.length >= 250) {
               const confirmed = await useUIStore.getState().confirm({
@@ -43,21 +69,34 @@ export function useAutosave(): void {
               recordHistory: false,
               resetHistory: true,
             });
+            applySaveSettings(globalSettings);
           }
         }
       })
-      .catch((err) => {
+      .catch(async (err) => {
         console.warn('Failed to load autosave on startup:', err);
+        if (!isMounted) return;
+        const tabId = getAutosaveTabId();
+        const hasSeparateSlot = preserveAutosaveAfterLoadFailure(tabId);
+        const detail = err instanceof Error ? err.message : 'The save data could not be read.';
+        await useUIStore.getState().confirm({
+          title: 'AUTOSAVE COULD NOT BE READ',
+          message: `${detail}\n\n${hasSeparateSlot ? 'The original autosave remains unchanged; future changes will use a separate slot.' : 'The original autosave remains unchanged, but this browser could not create a separate slot, so autosaving is paused for this session.'}`,
+          confirmLabel: 'CONTINUE',
+          showCancel: false,
+          intent: 'error',
+        });
       })
       .finally(() => {
-        if (isMounted) {
-          useUIStore.getState().setAutosaveLoaded();
-        }
+        if (!isMounted) return;
+        markStartupAutosaveLoadComplete();
+        useUIStore.getState().setAutosaveLoaded();
       });
 
     let dirtyVersion = 0;
     let lastSavedVersion = 0;
     let isSaving = false;
+    let autosaveFailureReported = false;
 
     const unsub = useFlowStore.subscribe(
       (state) => ({ nodes: state.nodes, edges: state.edges }),
@@ -81,12 +120,24 @@ export function useAutosave(): void {
       const capturedVersion = dirtyVersion;
       saveCurrentAutosave(getAutosaveTabId())
         .then(() => {
+          autosaveFailureReported = false;
           if (dirtyVersion === capturedVersion) {
             lastSavedVersion = capturedVersion;
           }
         })
-        .catch((err) => {
+        .catch(async (err) => {
           console.warn('Failed to commit autosave interval:', err);
+          if (autosaveFailureReported) return;
+          autosaveFailureReported = true;
+          const detail =
+            err instanceof Error ? err.message : 'The current canvas could not be saved.';
+          await useUIStore.getState().confirm({
+            title: 'AUTOSAVE COULD NOT BE UPDATED',
+            message: `${detail}\n\nThe previous autosave remains unchanged. The current canvas changes have not been saved yet; automatic retries will continue.`,
+            confirmLabel: 'CONTINUE',
+            showCancel: false,
+            intent: 'error',
+          });
         })
         .finally(() => {
           isSaving = false;

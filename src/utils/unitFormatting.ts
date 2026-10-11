@@ -97,11 +97,7 @@ export function formatTime(seconds: number): string {
   return isNegative ? `-${result}` : result;
 }
 
-export function formatLongTime(
-  seconds: number,
-  compact = false,
-  fractionDigits?: number,
-): string {
+export function formatLongTime(seconds: number, compact = false, fractionDigits?: number): string {
   if (!Number.isFinite(seconds)) return seconds < 0 ? '-∞' : '∞';
   const isNegative = seconds < 0;
   const absSeconds = Math.abs(seconds);

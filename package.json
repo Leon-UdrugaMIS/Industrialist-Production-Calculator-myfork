@@ -1,14 +1,18 @@
 {
   "name": "industrialist-calculator",
   "private": true,
-  "version": "0.8.10",
+  "version": "0.8.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
-    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\" && npm run format:check:tooling",
+    "format:check:tooling": "prettier --check \"package.json\" \".github/workflows/quality.yml\" \"tools/*.mjs\" \"tools/design-rules-baseline.json\"",
+    "test:persistence": "node --test --test-concurrency=1 tools/save-migration.test.mjs tools/persistence-storage.test.mjs",
+    "test:calculation": "node --test tools/calculation-validation.test.mjs && node --test tools/production-flow.test.mjs",
+    "check:design-rules": "node tools/check-design-rules.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -35,6 +39,7 @@
     "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.5.0",
     "prettier": "^3.8.3",
     "typescript": "~6.0.2",

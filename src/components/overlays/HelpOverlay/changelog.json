@@ -5,6 +5,25 @@
     "patches": [
       {
         "hash": "pending",
+        "version": "v0.8.11",
+        "patch": 11,
+        "date": "2026-10-12",
+        "subject": "Fix graph movement and navigation; strengthen validation and quality checks",
+        "items": [
+          "Added parser-based design-rule checks for theme-token colors, flat styling, functional motion exceptions, and the exact legacy inline-style baseline.",
+          "Hardened save migrations, validation, and persistence writes so unsupported or malformed data does not overwrite the recoverable original; improved save recovery flows.",
+          "Research saves now validate game modes, research IDs, prerequisite unlocks, and mode-restricted technologies; Sandbox modes derive unlocks from the active research list.",
+          "Correctly migrate v3 saves without a game month to v4, while preserving months from saves written by the previous app format.",
+          "Improved temperature-convergence diagnostics and validation of game data, recipe references, and calculation inputs.",
+          "Added regression coverage for migration and storage failures, calculation validation, and connected production flows, with CI quality gates for design rules, lint, formatting, build, and tests.",
+          "Updated brace-expansion to 5.0.12 and source-map-js to 1.2.2 to address reported vulnerabilities.",
+          "Adjusted the canvas footprints of the Quarry and Steam Condenser.",
+          "Self-loop edge routes now move with their node, and drag undo/redo restores the route points.",
+          "Edge popup center buttons now use the current source and target node positions after moves."
+        ]
+      },
+      {
+        "hash": "pending",
         "version": "v0.8.10",
         "patch": 10,
         "date": "2026-10-07",

@@ -2,14 +2,10 @@ import type { Edge } from '@xyflow/react';
 import { isGroupNode, isRecipeNode } from '../types/nodes';
 import type { CanvasNode } from '../types/nodes';
 import type { EdgeControlPoint } from '../types/edges';
-import { parseHandleId, buildHandleId, nextNodeId, nextEdgeId } from '../utils/idGenerator';
-import { getRecipe, resolveActiveRecipe } from '../data/lookup';
-import { cleanMachineCount } from '../utils/precision';
-import { sanitizeMachineCountConstraint } from '../utils/machineCountConstraint';
+import { parseHandleId, buildHandleId } from '../utils/idGenerator';
+import { getAllResearches, getRecipe, resolveActiveRecipe } from '../data/lookup';
+import { getBlockedResearchIds } from '../data/researchRules';
 import { useGlobalSettingsStore } from '../stores/useGlobalSettingsStore';
-import { DEFAULT_GAME_MONTH, isGameMonth } from '../types/globalSettings';
-import { remapProxyHandleIds } from './proxyHandleIds';
-
 import type {
   SavedNode,
   SavedRecipeNode,
@@ -17,16 +13,26 @@ import type {
   SaveData,
   GlobalSettings,
 } from '../types/saves';
+import {
+  migrateSaveData as migrateSaveDataStrict,
+  SaveMigrationError,
+  type RecipePortCounts,
+} from './saveMigrations';
 
-export const CURRENT_SAVE_VERSION = 3;
+export const CURRENT_SAVE_VERSION = 4;
 
 function sanitizeSavedPoints(raw: unknown): EdgeControlPoint[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error('[Persistence] Cannot save malformed edge control points.');
+  }
 
   const points: EdgeControlPoint[] = [];
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
-    if (!item || typeof item !== 'object') continue;
+    if (!item || typeof item !== 'object') {
+      throw new Error(`[Persistence] Cannot save malformed edge control point at index ${i}.`);
+    }
 
     const point = item as { x?: number; y?: number };
     if (
@@ -35,7 +41,7 @@ function sanitizeSavedPoints(raw: unknown): EdgeControlPoint[] | undefined {
       typeof point.y !== 'number' ||
       !Number.isFinite(point.y)
     ) {
-      continue;
+      throw new Error(`[Persistence] Cannot save non-finite edge control point at index ${i}.`);
     }
 
     points.push({ x: point.x, y: point.y });
@@ -44,195 +50,119 @@ function sanitizeSavedPoints(raw: unknown): EdgeControlPoint[] | undefined {
   return points.length > 0 ? points : undefined;
 }
 
-function sanitizeStringArray(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
+function resolveRecipePorts(
+  node: SavedRecipeNode,
+  globalSettings: GlobalSettings | undefined,
+  overrides: SaveData['dataOverrides'],
+): RecipePortCounts | undefined {
+  const override = overrides?.find((entry) => entry.id === `recipe:${node.recipeId}`);
+  if (override?.data._tombstone) return undefined;
 
-  const items: string[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    const item = raw[i];
-    if (typeof item === 'string' && item) {
-      items.push(item);
-    }
-  }
-
-  return items;
+  const recipe =
+    resolveActiveRecipe(
+      node.recipeId,
+      node.settings,
+      undefined,
+      undefined,
+      globalSettings ? { globalSettings: { ...globalSettings } } : undefined,
+    ) ?? getRecipe(node.recipeId);
+  const inputs = override?.data.inputs ?? recipe?.inputs;
+  const outputs = override?.data.outputs ?? recipe?.outputs;
+  if (!Array.isArray(inputs) || !Array.isArray(outputs)) return undefined;
+  return { inputs: inputs.length, outputs: outputs.length };
 }
 
-export function migrateSaveData(rawData: unknown): SaveData {
-  if (!rawData || typeof rawData !== 'object') {
-    return { version: CURRENT_SAVE_VERSION, nodes: [], edges: [] };
-  }
+export function migrateSaveData(
+  rawData: unknown,
+  recipeOverridesForValidation?: SaveData['dataOverrides'],
+): SaveData {
+  const migrated = migrateSaveDataStrict(
+    rawData,
+    CURRENT_SAVE_VERSION,
+    (node, globalSettings, overrides) => resolveRecipePorts(node, globalSettings, overrides),
+    recipeOverridesForValidation,
+  );
 
-  const data = rawData as Record<string, unknown>;
+  validateUnlockedResearches(migrated.globalSettings, recipeOverridesForValidation);
+  return migrated;
+}
 
-  const version =
-    typeof data.version === 'number' && data.version > 0 ? data.version : CURRENT_SAVE_VERSION;
+function validateUnlockedResearches(
+  settings: GlobalSettings | undefined,
+  overrides: SaveData['dataOverrides'],
+): void {
+  const currentSettings = useGlobalSettingsStore.getState().settings;
+  const difficulty = settings?.difficulty ?? currentSettings.difficulty;
+  if (difficulty === 'sandbox' || difficulty === 'sandbox_plus') return;
 
-  const rawNodes = Array.isArray(data.nodes) ? data.nodes : [];
-  const nodes: SavedNode[] = rawNodes.map((rawN) => {
-    if (!rawN || typeof rawN !== 'object') {
-      return {
-        id: `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        type: 'recipe',
-        recipeId: '',
-        machineCount: 1,
-        position: { x: 0, y: 0 },
-        settings: {},
-      };
-    }
+  const unlockedIds = new Set(settings?.unlockedResearchIds ?? currentSettings.unlockedResearchIds);
+  const prerequisitesByResearchId = new Map<string, unknown>(
+    getAllResearches().map((research) => [research.id, research.prerequisites]),
+  );
 
-    const n = rawN as Record<string, unknown>;
-    const id =
-      typeof n.id === 'string'
-        ? n.id
-        : `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const pos =
-      n.position && typeof n.position === 'object'
-        ? (n.position as { x?: number; y?: number })
-        : { x: 0, y: 0 };
-    const position = {
-      x: typeof pos.x === 'number' && Number.isFinite(pos.x) ? pos.x : 0,
-      y: typeof pos.y === 'number' && Number.isFinite(pos.y) ? pos.y : 0,
-    };
-
-    if (n.type === 'group') {
-      return {
-        id,
-        type: 'group',
-        label: typeof n.label === 'string' ? n.label : 'Group',
-        collapsed: typeof n.collapsed === 'boolean' ? n.collapsed : false,
-        inputProxyHandleIds: sanitizeStringArray(n.inputProxyHandleIds),
-        outputProxyHandleIds: sanitizeStringArray(n.outputProxyHandleIds),
-        position,
-      };
-    }
-
-    let settings: Record<string, unknown> = {};
-    if (n.settings && typeof n.settings === 'object') {
-      settings = { ...(n.settings as Record<string, unknown>) };
-    }
-
-    let recipeId = typeof n.recipeId === 'string' ? n.recipeId : '';
-    if (recipeId && !getRecipe(recipeId)) {
-      recipeId = '';
-    }
-
-    let machineCount = typeof n.machineCount === 'number' ? n.machineCount : 1;
-    if (!Number.isFinite(machineCount) || Number.isNaN(machineCount) || machineCount < 0) {
-      machineCount = 1;
-    } else {
-      machineCount = cleanMachineCount(machineCount);
-    }
-
-    const savedNode: SavedRecipeNode = {
-      id,
-      type: 'recipe',
-      recipeId,
-      machineCount,
-      machineCountConstraint: sanitizeMachineCountConstraint(n.machineCountConstraint),
-      position,
-      settings,
-      isTarget: typeof n.isTarget === 'boolean' ? n.isTarget : undefined,
-      groupId: typeof n.groupId === 'string' ? n.groupId : undefined,
-      hidden: typeof n.hidden === 'boolean' ? n.hidden : undefined,
-    };
-
-    if (Array.isArray(n.inputOrder)) {
-      const uniqueInts = new Set<number>();
-      for (const x of n.inputOrder) {
-        if (typeof x === 'number' && Number.isInteger(x) && x >= 0) {
-          uniqueInts.add(x);
-        }
-      }
-      savedNode.inputOrder = Array.from(uniqueInts);
-    }
-    if (Array.isArray(n.outputOrder)) {
-      const uniqueInts = new Set<number>();
-      for (const x of n.outputOrder) {
-        if (typeof x === 'number' && Number.isInteger(x) && x >= 0) {
-          uniqueInts.add(x);
-        }
-      }
-      savedNode.outputOrder = Array.from(uniqueInts);
-    }
-
-    return savedNode;
-  });
-
-  const rawEdges = Array.isArray(data.edges) ? data.edges : [];
-  const edges: SavedEdge[] = rawEdges.map((rawE) => {
-    if (!rawE || typeof rawE !== 'object') {
-      return {
-        id: `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        source: '',
-        sourceIndex: 0,
-        target: '',
-        targetIndex: 0,
-      };
-    }
-
-    const e = rawE as Record<string, unknown>;
-    const sIdx = typeof e.sourceIndex === 'number' ? Math.floor(e.sourceIndex) : 0;
-    const tIdx = typeof e.targetIndex === 'number' ? Math.floor(e.targetIndex) : 0;
-
-    return {
-      id:
-        typeof e.id === 'string'
-          ? e.id
-          : `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      source: typeof e.source === 'string' ? e.source : '',
-      sourceIndex: sIdx >= 0 ? sIdx : 0,
-      target: typeof e.target === 'string' ? e.target : '',
-      targetIndex: tIdx >= 0 ? tIdx : 0,
-      controlPoints: sanitizeSavedPoints(e.controlPoints),
-      orthogonalTurns: sanitizeSavedPoints(e.orthogonalTurns),
-      hidden: typeof e.hidden === 'boolean' ? e.hidden : undefined,
-    };
-  });
-
-  let globalSettings: GlobalSettings | undefined;
-  if (data.globalSettings && typeof data.globalSettings === 'object') {
-    const gs = data.globalSettings as Record<string, unknown>;
-    globalSettings = {
-      global_pollution: typeof gs.global_pollution === 'number' ? gs.global_pollution : 10,
-      current_month: isGameMonth(gs.current_month) ? gs.current_month : DEFAULT_GAME_MONTH,
-      difficulty: typeof gs.difficulty === 'string' ? gs.difficulty : undefined,
-      unlockedResearchIds: Array.isArray(gs.unlockedResearchIds)
-        ? gs.unlockedResearchIds.filter((x): x is string => typeof x === 'string')
-        : undefined,
-      oreNodesEnabled: typeof gs.oreNodesEnabled === 'boolean' ? gs.oreNodesEnabled : undefined,
-      showVariantLimited:
-        typeof gs.showVariantLimited === 'boolean' ? gs.showVariantLimited : undefined,
-    };
-  }
-
-  let dataOverrides: { id: string; data: Record<string, unknown> }[] | undefined;
-  if (Array.isArray(data.dataOverrides)) {
-    dataOverrides = [];
-    for (let i = 0; i < data.dataOverrides.length; i++) {
-      const entry = data.dataOverrides[i];
-      if (
-        entry &&
-        typeof entry === 'object' &&
-        typeof entry.id === 'string' &&
-        entry.data &&
-        typeof entry.data === 'object'
-      ) {
-        dataOverrides.push({
-          id: entry.id,
-          data: entry.data as Record<string, unknown>,
-        });
-      }
+  for (const override of overrides ?? []) {
+    if (!override.id.startsWith('research:')) continue;
+    const researchId = override.id.slice('research:'.length);
+    if (!researchId) continue;
+    if (override.data._tombstone) {
+      prerequisitesByResearchId.delete(researchId);
+    } else if (
+      Object.hasOwn(override.data, 'prerequisites') ||
+      !prerequisitesByResearchId.has(researchId)
+    ) {
+      prerequisitesByResearchId.set(researchId, override.data.prerequisites);
     }
   }
 
-  return {
-    version,
-    nodes,
-    edges,
-    globalSettings,
-    dataOverrides,
+  const dependentsByResearchId = new Map<string, string[]>();
+  for (const researchId of prerequisitesByResearchId.keys()) {
+    dependentsByResearchId.set(researchId, []);
+  }
+  for (const [researchId, prerequisites] of prerequisitesByResearchId) {
+    if (!Array.isArray(prerequisites)) continue;
+    for (const prerequisite of prerequisites) {
+      if (typeof prerequisite !== 'string' || !prerequisite.startsWith('s_')) continue;
+      dependentsByResearchId.get(prerequisite)?.push(researchId);
+    }
+  }
+  const blockedResearchIds = getBlockedResearchIds(difficulty, dependentsByResearchId);
+
+  const fail = (reason: string): never => {
+    throw new SaveMigrationError(
+      `Cannot load save: globalSettings.unlockedResearchIds ${reason}. The input data was not modified.`,
+    );
   };
+
+  for (const researchId of unlockedIds) {
+    if (!prerequisitesByResearchId.has(researchId)) {
+      return fail(`references unknown research "${researchId}"`);
+    }
+    if (blockedResearchIds.has(researchId)) {
+      return fail(`contains research "${researchId}" that is unavailable in ${difficulty} mode`);
+    }
+    const prerequisites = prerequisitesByResearchId.get(researchId);
+    const prerequisiteList: unknown[] | undefined = Array.isArray(prerequisites)
+      ? prerequisites
+      : undefined;
+    if (!prerequisiteList) {
+      return fail(`cannot validate prerequisites for research "${researchId}"`);
+    }
+
+    for (const prerequisite of prerequisiteList) {
+      if (typeof prerequisite !== 'string' || prerequisite.length === 0) {
+        return fail(`contains a malformed prerequisite for research "${researchId}"`);
+      }
+      if (!prerequisite.startsWith('s_')) continue;
+      if (!prerequisitesByResearchId.has(prerequisite)) {
+        return fail(`research "${researchId}" references unknown prerequisite "${prerequisite}"`);
+      }
+      if (!unlockedIds.has(prerequisite)) {
+        return fail(
+          `research "${researchId}" is unlocked while prerequisite "${prerequisite}" is locked`,
+        );
+      }
+    }
+  }
 }
 
 export function serializeCanvas(
@@ -273,195 +203,144 @@ export function serializeCanvas(
 
   const savedEdges: SavedEdge[] = [];
   for (let i = 0; i < edges.length; i++) {
-    const e = edges[i];
-    if (e.id.startsWith('proxy-')) continue;
-    if (!e.sourceHandle || !e.targetHandle) continue;
+    const edge = edges[i];
+    if (edge.id.startsWith('proxy-')) continue;
+    if (!edge.sourceHandle || !edge.targetHandle) {
+      throw new Error(`[Persistence] Cannot save edge ${edge.id} without both port handles.`);
+    }
 
-    const sourceParsed = parseHandleId(e.sourceHandle);
-    const targetParsed = parseHandleId(e.targetHandle);
-
-    if (!sourceParsed || !targetParsed) {
-      console.warn(`[Persistence] Dropping malformed edge ${e.id} during serialization.`);
-      continue;
+    const sourceParsed = parseHandleId(edge.sourceHandle);
+    const targetParsed = parseHandleId(edge.targetHandle);
+    if (
+      !sourceParsed ||
+      sourceParsed.nodeId !== edge.source ||
+      sourceParsed.side !== 'output' ||
+      !targetParsed ||
+      targetParsed.nodeId !== edge.target ||
+      targetParsed.side !== 'input'
+    ) {
+      throw new Error(`[Persistence] Cannot save edge ${edge.id} with malformed port handles.`);
     }
 
     savedEdges.push({
-      id: e.id,
-      source: e.source,
+      id: edge.id,
+      source: edge.source,
       sourceIndex: sourceParsed.index,
-      target: e.target,
+      target: edge.target,
       targetIndex: targetParsed.index,
       controlPoints: sanitizeSavedPoints(
-        (e.data as { controlPoints?: unknown } | undefined)?.controlPoints,
+        (edge.data as { controlPoints?: unknown } | undefined)?.controlPoints,
       ),
       orthogonalTurns: sanitizeSavedPoints(
-        (e.data as { orthogonalTurns?: unknown } | undefined)?.orthogonalTurns,
+        (edge.data as { orthogonalTurns?: unknown } | undefined)?.orthogonalTurns,
       ),
-      hidden: e.hidden || undefined,
+      hidden: edge.hidden || undefined,
     });
   }
 
-  const globalSettings: GlobalSettings = useGlobalSettingsStore.getState().settings;
+  const globalSettings: GlobalSettings = { ...useGlobalSettingsStore.getState().settings };
+  if (globalSettings.difficulty === 'sandbox' || globalSettings.difficulty === 'sandbox_plus') {
+    delete globalSettings.unlockedResearchIds;
+  }
 
-  return {
-    version: CURRENT_SAVE_VERSION,
-    nodes: savedNodes,
-    edges: savedEdges,
-    globalSettings,
-    dataOverrides: allOverrides && allOverrides.length > 0 ? allOverrides : undefined,
-  };
+  return migrateSaveData(
+    {
+      version: CURRENT_SAVE_VERSION,
+      nodes: savedNodes,
+      edges: savedEdges,
+      globalSettings,
+      dataOverrides: allOverrides && allOverrides.length > 0 ? allOverrides : undefined,
+    },
+    allOverrides,
+  );
 }
 
-export function deserializeCanvas(saveData: SaveData): {
+export function deserializeCanvas(
+  saveData: unknown,
+  recipeOverridesForValidation?: SaveData['dataOverrides'],
+): {
   nodes: CanvasNode[];
   edges: Edge[];
+  globalSettings?: GlobalSettings;
 } {
-  const migrated = migrateSaveData(saveData);
-
-  if (migrated.globalSettings) {
-    useGlobalSettingsStore.getState().importSettings(migrated.globalSettings);
-  }
-
-  const idMap = new Map<string, string>();
-  const seenNodeIds = new Set<string>();
-  const finalNodeIds = new Array<string>(migrated.nodes.length);
-  const finalGroupIds = new Set<string>();
-  const finalRecipeIds = new Set<string>();
-
-  for (let i = 0; i < migrated.nodes.length; i++) {
-    const sn = migrated.nodes[i];
-    let finalId = sn.id;
-
-    if (seenNodeIds.has(finalId) || !finalId) {
-      finalId = nextNodeId();
-      idMap.set(sn.id, finalId);
-    }
-    seenNodeIds.add(finalId);
-    finalNodeIds[i] = finalId;
-    if (sn.type === 'group') {
-      finalGroupIds.add(finalId);
-    } else {
-      finalRecipeIds.add(finalId);
-    }
-  }
-
-  const nodes: CanvasNode[] = [];
-  for (let i = 0; i < migrated.nodes.length; i++) {
-    const sn = migrated.nodes[i];
-    const finalId = finalNodeIds[i];
-    if (sn.type === 'group') {
-      nodes.push({
-        id: finalId,
+  const migrated = migrateSaveData(saveData, recipeOverridesForValidation);
+  const nodes: CanvasNode[] = migrated.nodes.map((savedNode) => {
+    if (savedNode.type === 'group') {
+      return {
+        id: savedNode.id,
         type: 'group',
-        position: sn.position,
+        position: savedNode.position,
         data: {
-          label: sn.label,
-          collapsed: sn.collapsed,
+          label: savedNode.label,
+          collapsed: savedNode.collapsed,
           handlesReady: false,
-          inputProxyHandleIds: remapProxyHandleIds(
-            sn.inputProxyHandleIds,
-            idMap,
-            finalRecipeIds,
-            'input',
-          ),
-          outputProxyHandleIds: remapProxyHandleIds(
-            sn.outputProxyHandleIds,
-            idMap,
-            finalRecipeIds,
-            'output',
-          ),
+          inputProxyHandleIds: savedNode.inputProxyHandleIds,
+          outputProxyHandleIds: savedNode.outputProxyHandleIds,
         },
-      });
-    } else {
-      const groupId = sn.groupId ? (idMap.get(sn.groupId) ?? sn.groupId) : undefined;
-      nodes.push({
-        id: finalId,
-        type: 'recipe',
-        position: sn.position,
-        hidden: sn.hidden || undefined,
-        data: {
-          recipeId: sn.recipeId,
-          machineCount: sn.machineCount,
-          machineCountConstraint: sn.machineCountConstraint,
-          inputOrder: sn.inputOrder,
-          outputOrder: sn.outputOrder,
-          settings: sn.settings,
-          isTarget: sn.isTarget,
-          groupId: groupId && finalGroupIds.has(groupId) ? groupId : undefined,
-        },
-      });
-    }
-  }
-
-  const nodeLookup = new Map<string, SavedRecipeNode>();
-  for (let i = 0; i < migrated.nodes.length; i++) {
-    const n = migrated.nodes[i];
-    if (n.type !== 'group' && !nodeLookup.has(n.id)) {
-      nodeLookup.set(n.id, n);
-    }
-  }
-
-  const edges: Edge[] = [];
-  const seenEdgeIds = new Set<string>();
-
-  for (let i = 0; i < migrated.edges.length; i++) {
-    const se = migrated.edges[i];
-
-    const sourceId = idMap.get(se.source) ?? se.source;
-    const targetId = idMap.get(se.target) ?? se.target;
-
-    const sourceNode = nodeLookup.get(se.source);
-    const targetNode = nodeLookup.get(se.target);
-
-    if (!sourceNode || !targetNode) continue;
-
-    const sourceRecipe =
-      resolveActiveRecipe(sourceNode.recipeId, sourceNode.settings) ??
-      getRecipe(sourceNode.recipeId);
-    const targetRecipe =
-      resolveActiveRecipe(targetNode.recipeId, targetNode.settings) ??
-      getRecipe(targetNode.recipeId);
-
-    if (!sourceRecipe || !targetRecipe) continue;
-
-    if (
-      se.sourceIndex >= sourceRecipe.outputs.length ||
-      se.targetIndex >= targetRecipe.inputs.length
-    ) {
-      console.warn(`[Persistence] Dropping orphaned edge ${se.id} connected to deleted port.`);
-      continue;
+      };
     }
 
-    let finalEdgeId = se.id;
-    if (seenEdgeIds.has(finalEdgeId) || !finalEdgeId) {
-      finalEdgeId = nextEdgeId();
-    }
-    seenEdgeIds.add(finalEdgeId);
+    return {
+      id: savedNode.id,
+      type: 'recipe',
+      position: savedNode.position,
+      hidden: savedNode.hidden || undefined,
+      data: {
+        recipeId: savedNode.recipeId,
+        machineCount: savedNode.machineCount,
+        machineCountConstraint: savedNode.machineCountConstraint,
+        inputOrder: savedNode.inputOrder,
+        outputOrder: savedNode.outputOrder,
+        settings: savedNode.settings,
+        isTarget: savedNode.isTarget,
+        groupId: savedNode.groupId,
+      },
+    };
+  });
 
+  const edges: Edge[] = migrated.edges.map((savedEdge) => {
     const edgeData =
-      (se.controlPoints && se.controlPoints.length > 0) ||
-      (se.orthogonalTurns && se.orthogonalTurns.length > 0)
+      (savedEdge.controlPoints && savedEdge.controlPoints.length > 0) ||
+      (savedEdge.orthogonalTurns && savedEdge.orthogonalTurns.length > 0)
         ? {
-            ...(se.controlPoints && se.controlPoints.length > 0
-              ? { controlPoints: se.controlPoints }
+            ...(savedEdge.controlPoints && savedEdge.controlPoints.length > 0
+              ? { controlPoints: savedEdge.controlPoints }
               : {}),
-            ...(se.orthogonalTurns && se.orthogonalTurns.length > 0
-              ? { orthogonalTurns: se.orthogonalTurns }
+            ...(savedEdge.orthogonalTurns && savedEdge.orthogonalTurns.length > 0
+              ? { orthogonalTurns: savedEdge.orthogonalTurns }
               : {}),
           }
         : undefined;
 
-    edges.push({
-      id: finalEdgeId,
+    return {
+      id: savedEdge.id,
       type: 'recipe',
-      source: sourceId,
-      target: targetId,
-      sourceHandle: buildHandleId(sourceId, 'output', se.sourceIndex),
-      targetHandle: buildHandleId(targetId, 'input', se.targetIndex),
+      source: savedEdge.source,
+      target: savedEdge.target,
+      sourceHandle: buildHandleId(savedEdge.source, 'output', savedEdge.sourceIndex),
+      targetHandle: buildHandleId(savedEdge.target, 'input', savedEdge.targetIndex),
       data: edgeData,
-      hidden: se.hidden || undefined,
-    });
-  }
+      hidden: savedEdge.hidden || undefined,
+    };
+  });
 
-  return { nodes, edges };
+  return { nodes, edges, globalSettings: migrated.globalSettings };
 }
+
+export function applySaveSettings(settings: GlobalSettings | undefined): void {
+  if (!settings) return;
+
+  const store = useGlobalSettingsStore.getState();
+  const difficulty = settings.difficulty ?? store.settings.difficulty;
+  const unlockedResearchIds =
+    difficulty === 'sandbox' || difficulty === 'sandbox_plus'
+      ? getAllResearches().map((research) => research.id)
+      : settings.unlockedResearchIds;
+
+  store.importSettings({
+    ...settings,
+    ...(unlockedResearchIds === undefined ? {} : { unlockedResearchIds }),
+  });
+}
+
+export { SaveMigrationError };

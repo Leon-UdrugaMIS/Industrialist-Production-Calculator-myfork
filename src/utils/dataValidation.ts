@@ -20,6 +20,29 @@ export interface ValidationResult {
   errors: ValidationError[];
 }
 
+export interface DuplicateIdentifier {
+  id: string;
+  index: number;
+  firstIndex: number;
+}
+
+export function findDuplicateIdentifiers(identifiers: unknown[]): DuplicateIdentifier[] {
+  const firstIndexes = new Map<string, number>();
+  const duplicates: DuplicateIdentifier[] = [];
+
+  identifiers.forEach((identifier, index) => {
+    if (typeof identifier !== 'string' || !identifier.trim()) return;
+    const firstIndex = firstIndexes.get(identifier);
+    if (firstIndex === undefined) {
+      firstIndexes.set(identifier, index);
+      return;
+    }
+    duplicates.push({ id: identifier, index, firstIndex });
+  });
+
+  return duplicates;
+}
+
 export function validateProduct(product: unknown): ValidationResult {
   const errors: ValidationError[] = [];
 
@@ -45,14 +68,14 @@ export function validateProduct(product: unknown): ValidationResult {
     errors.push({ field: 'name', message: 'Name must be a non-empty string' });
   }
 
-  if (typeof p.sell_price !== 'number' || isNaN(p.sell_price)) {
+  if (typeof p.sell_price !== 'number' || !Number.isFinite(p.sell_price)) {
     errors.push({
       field: 'sell_price',
       message: 'Sell price must be a valid number',
     });
   }
 
-  if (typeof p.rp_multiplier !== 'number' || isNaN(p.rp_multiplier)) {
+  if (typeof p.rp_multiplier !== 'number' || !Number.isFinite(p.rp_multiplier)) {
     errors.push({
       field: 'rp_multiplier',
       message: 'RP multiplier must be a valid number',
@@ -118,8 +141,14 @@ export function validateMachine(
   const rawCost = m.cost as unknown;
   const costVal =
     typeof rawCost === 'string' && rawCost.toLowerCase() === 'infinity' ? Infinity : rawCost;
-  if (typeof costVal !== 'number' || isNaN(costVal)) {
-    errors.push({ field: 'cost', message: 'Cost must be a valid number' });
+  if (
+    typeof costVal !== 'number' ||
+    (!Number.isFinite(costVal) && costVal !== Number.POSITIVE_INFINITY)
+  ) {
+    errors.push({
+      field: 'cost',
+      message: 'Cost must be finite or the positive Infinity sentinel',
+    });
   } else if (!isVirtualModular && costVal <= 0) {
     errors.push({ field: 'cost', message: 'Cost must be greater than 0' });
   }
@@ -290,7 +319,7 @@ export function validateRecipe(
     }
   }
 
-  if (typeof r.cycle_time !== 'number' || isNaN(r.cycle_time)) {
+  if (typeof r.cycle_time !== 'number' || !Number.isFinite(r.cycle_time)) {
     errors.push({
       field: 'cycle_time',
       message: 'Cycle time must be a valid number',
@@ -302,7 +331,7 @@ export function validateRecipe(
     });
   }
 
-  if (typeof r.power_use !== 'number' || isNaN(r.power_use)) {
+  if (typeof r.power_use !== 'number' || !Number.isFinite(r.power_use)) {
     errors.push({
       field: 'power_use',
       message: 'Power use must be a valid number',
@@ -346,7 +375,7 @@ export function validateRecipe(
         });
       }
 
-      if (typeof typedEffect.power_use !== 'number' || isNaN(typedEffect.power_use)) {
+      if (typeof typedEffect.power_use !== 'number' || !Number.isFinite(typedEffect.power_use)) {
         errors.push({
           field: `${field}[${idx}].power_use`,
           message: 'Power effect use must be a valid number',
@@ -369,7 +398,7 @@ export function validateRecipe(
   validatePowerEffects('powerEffects', r.powerEffects);
   validatePowerEffects('powerAccountingEffects', r.powerAccountingEffects);
 
-  if (typeof r.pollution !== 'number' || isNaN(r.pollution)) {
+  if (typeof r.pollution !== 'number' || !Number.isFinite(r.pollution)) {
     errors.push({
       field: 'pollution',
       message: 'Pollution must be a valid number',
@@ -399,7 +428,7 @@ export function validateRecipe(
           message: `Product ID "${inp.product_id}" does not exist in product database`,
         });
       }
-      if (typeof inp.quantity !== 'number' || isNaN(inp.quantity) || inp.quantity <= 0) {
+      if (typeof inp.quantity !== 'number' || !Number.isFinite(inp.quantity) || inp.quantity <= 0) {
         errors.push({
           field: `inputs[${idx}].quantity`,
           message: 'Quantity must be a number greater than 0',
@@ -420,6 +449,51 @@ export function validateRecipe(
           field: `inputs[${idx}].product_link_id`,
           message: 'Product link ID must be a string',
         });
+      }
+      if (inp.pollutionPerFlow !== undefined && !Number.isFinite(inp.pollutionPerFlow)) {
+        errors.push({
+          field: `inputs[${idx}].pollutionPerFlow`,
+          message: 'Pollution per flow must be a finite number when present',
+        });
+      }
+      if (inp.flowDependencies !== undefined) {
+        if (!Array.isArray(inp.flowDependencies)) {
+          errors.push({
+            field: `inputs[${idx}].flowDependencies`,
+            message: 'Flow dependencies must be an array when present',
+          });
+        } else {
+          inp.flowDependencies.forEach((dependency: unknown, dependencyIndex: number) => {
+            if (!dependency || typeof dependency !== 'object') {
+              errors.push({
+                field: `inputs[${idx}].flowDependencies[${dependencyIndex}]`,
+                message: 'Flow dependency must be a valid object',
+              });
+              return;
+            }
+            const typedDependency = dependency as Record<string, unknown>;
+            if (
+              typeof typedDependency.sourceInputIndex !== 'number' ||
+              !Number.isInteger(typedDependency.sourceInputIndex) ||
+              typedDependency.sourceInputIndex < 0 ||
+              typedDependency.sourceInputIndex >= (Array.isArray(r.inputs) ? r.inputs.length : 0)
+            ) {
+              errors.push({
+                field: `inputs[${idx}].flowDependencies[${dependencyIndex}].sourceInputIndex`,
+                message: 'Source input index must refer to an input in this recipe',
+              });
+            }
+            if (
+              typeof typedDependency.coefficient !== 'number' ||
+              !Number.isFinite(typedDependency.coefficient)
+            ) {
+              errors.push({
+                field: `inputs[${idx}].flowDependencies[${dependencyIndex}].coefficient`,
+                message: 'Flow dependency coefficient must be a finite number',
+              });
+            }
+          });
+        }
       }
     });
   }
@@ -447,13 +521,13 @@ export function validateRecipe(
           message: `Product ID "${out.product_id}" does not exist in product database`,
         });
       }
-      if (typeof out.quantity !== 'number' || isNaN(out.quantity) || out.quantity <= 0) {
+      if (typeof out.quantity !== 'number' || !Number.isFinite(out.quantity) || out.quantity <= 0) {
         errors.push({
           field: `outputs[${idx}].quantity`,
           message: 'Quantity must be a number greater than 0',
         });
       }
-      if (typeof out.temperature !== 'number' || isNaN(out.temperature)) {
+      if (typeof out.temperature !== 'number' || !Number.isFinite(out.temperature)) {
         errors.push({
           field: `outputs[${idx}].temperature`,
           message: 'Temperature must be a valid number',
@@ -478,6 +552,31 @@ export function validateRecipe(
     });
   }
 
+  for (const field of ['potential_inputs', 'potential_outputs'] as const) {
+    const potentialProducts = r[field];
+    if (potentialProducts === undefined) continue;
+    if (!Array.isArray(potentialProducts)) {
+      errors.push({
+        field,
+        message: 'Potential products must be an array when present',
+      });
+      continue;
+    }
+    potentialProducts.forEach((productId: unknown, index: number) => {
+      if (typeof productId !== 'string' || !productId.trim()) {
+        errors.push({
+          field: `${field}[${index}]`,
+          message: 'Product ID must be a non-empty string',
+        });
+      } else if (validProductIds && !validProductIds.has(productId)) {
+        errors.push({
+          field: `${field}[${index}]`,
+          message: `Product ID "${productId}" does not exist in product database`,
+        });
+      }
+    });
+  }
+
   if (r.isSellTrash !== undefined && typeof r.isSellTrash !== 'boolean') {
     errors.push({ field: 'isSellTrash', message: 'isSellTrash must be a boolean' });
   }
@@ -488,7 +587,10 @@ export function validateRecipe(
   };
 }
 
-export function validateResearch(research: unknown): ValidationResult {
+export function validateResearch(
+  research: unknown,
+  validResearchIds?: Set<string>,
+): ValidationResult {
   const errors: ValidationError[] = [];
 
   if (!research || typeof research !== 'object') {
@@ -513,7 +615,7 @@ export function validateResearch(research: unknown): ValidationResult {
     errors.push({ field: 'name', message: 'Name must be a non-empty string' });
   }
 
-  if (typeof r.rp_cost !== 'number' || isNaN(r.rp_cost)) {
+  if (typeof r.rp_cost !== 'number' || !Number.isFinite(r.rp_cost)) {
     errors.push({
       field: 'rp_cost',
       message: 'RP cost must be a valid number',
@@ -540,6 +642,11 @@ export function validateResearch(research: unknown): ValidationResult {
         errors.push({
           field: `prerequisites[${idx}]`,
           message: 'Prerequisite ID must be a non-empty string',
+        });
+      } else if (validResearchIds && prereq.startsWith('s_') && !validResearchIds.has(prereq)) {
+        errors.push({
+          field: `prerequisites[${idx}]`,
+          message: `Research ID "${prereq}" does not exist in research database`,
         });
       }
     });
@@ -586,21 +693,58 @@ export function validateFullDatabase(
   const machineErrors: { id: string; errors: ValidationError[] }[] = [];
   const recipeErrors: { id: string; errors: ValidationError[] }[] = [];
   const researchErrors: { id: string; errors: ValidationError[] }[] = [];
+  const productDuplicates = new Map(
+    findDuplicateIdentifiers(
+      products.map((p) => (p as Partial<Product> & Record<string, unknown>)?.id),
+    ).map((duplicate) => [duplicate.index, duplicate]),
+  );
+  const machineDuplicates = new Map(
+    findDuplicateIdentifiers(
+      machines.map((m) => (m as Partial<Machine> & Record<string, unknown>)?.id),
+    ).map((duplicate) => [duplicate.index, duplicate]),
+  );
+  const recipeDuplicates = new Map(
+    findDuplicateIdentifiers(
+      recipes.map((recipe) => (recipe as Partial<Recipe> & Record<string, unknown>)?.id),
+    ).map((duplicate) => [duplicate.index, duplicate]),
+  );
+  const researchDuplicates = new Map(
+    findDuplicateIdentifiers(
+      researches.map((research) => (research as Partial<Research> & Record<string, unknown>)?.id),
+    ).map((duplicate) => [duplicate.index, duplicate]),
+  );
+
+  const addDuplicateIdError = (
+    errors: ValidationError[],
+    duplicate: DuplicateIdentifier | undefined,
+    namespace: string,
+  ) => {
+    if (!duplicate) return;
+    errors.push({
+      field: 'id',
+      message: `Duplicate ${namespace} ID "${duplicate.id}" (first seen at index ${duplicate.firstIndex})`,
+    });
+  };
 
   products.forEach((p, idx) => {
     const res = validateProduct(p);
-    if (!res.valid) {
+    addDuplicateIdError(res.errors, productDuplicates.get(idx), 'product');
+    if (res.errors.length > 0) {
       const id = (p as Partial<Product> & Record<string, unknown>)?.id;
-      productErrors.push({ id: id || `[Index ${idx}]`, errors: res.errors });
+      productErrors.push({
+        id: id ? `${id} [Index ${idx}]` : `[Index ${idx}]`,
+        errors: res.errors,
+      });
     }
   });
 
   researches.forEach((r, idx) => {
-    const res = validateResearch(r);
-    if (!res.valid) {
+    const res = validateResearch(r, researchIds);
+    addDuplicateIdError(res.errors, researchDuplicates.get(idx), 'research');
+    if (res.errors.length > 0) {
       const id = (r as Partial<Research> & Record<string, unknown>)?.id;
       researchErrors.push({
-        id: id || `[Index ${idx}]`,
+        id: id ? `${id} [Index ${idx}]` : `[Index ${idx}]`,
         errors: res.errors,
       });
     }
@@ -608,18 +752,23 @@ export function validateFullDatabase(
 
   machines.forEach((m, idx) => {
     const res = validateMachine(m, researchIds, machineIds);
-    if (!res.valid) {
+    addDuplicateIdError(res.errors, machineDuplicates.get(idx), 'machine');
+    if (res.errors.length > 0) {
       const id = (m as Partial<Machine> & Record<string, unknown>)?.id;
-      machineErrors.push({ id: id || `[Index ${idx}]`, errors: res.errors });
+      machineErrors.push({
+        id: id ? `${id} [Index ${idx}]` : `[Index ${idx}]`,
+        errors: res.errors,
+      });
     }
   });
 
   recipes.forEach((rec, idx) => {
     const res = validateRecipe(rec, productIds, machineIds);
-    if (!res.valid) {
+    addDuplicateIdError(res.errors, recipeDuplicates.get(idx), 'recipe');
+    if (res.errors.length > 0) {
       const id = (rec as Partial<Recipe> & Record<string, unknown>)?.id;
       recipeErrors.push({
-        id: id || `[Index ${idx}]`,
+        id: id ? `${id} [Index ${idx}]` : `[Index ${idx}]`,
         errors: res.errors,
       });
     }

@@ -13,7 +13,7 @@ import {
   deleteSave,
   getDataOverrides,
 } from '../persistence/idb';
-import { deserializeCanvas } from '../persistence/transformer';
+import { applySaveSettings, deserializeCanvas } from '../persistence/transformer';
 import { rebuildActiveDatabase, reloadDatabase, getAllResearches, getRecipe } from '../data/lookup';
 import { setSpecialRecipeOverrides } from '../data/registry';
 import type { SpecialRecipe } from '../types/specialRecipes';
@@ -497,7 +497,8 @@ function applyInitialCanvas(
     return {};
   }
 
-  const { nodes, edges } = deserializeCanvas(definition.initialCanvas.data);
+  const { nodes, edges, globalSettings } = deserializeCanvas(definition.initialCanvas.data);
+  applySaveSettings(globalSettings);
   flow.setNodesAndEdges(nodes, edges, { recordHistory: false, resetHistory: true });
   return { ...(definition.initialCanvas.initialAliases ?? {}) };
 }
@@ -672,7 +673,21 @@ export const useTutorialStore = create<TutorialState>((set, get) => ({
     const definition = getTutorialDefinition(id);
     if (!definition) return;
 
-    const dataOverrides = await getDataOverrides();
+    let dataOverrides: DataOverride[];
+    try {
+      dataOverrides = await getDataOverrides();
+    } catch (error) {
+      const detail =
+        error instanceof Error ? error.message : 'Custom database overrides could not be read.';
+      await useUIStore.getState().confirm({
+        title: 'TUTORIAL COULD NOT START',
+        message: `${detail}\n\nYour project was left unchanged. Please try again when browser storage is available.`,
+        confirmLabel: 'OK',
+        showCancel: false,
+        intent: 'error',
+      });
+      return;
+    }
     const rootSnapshot: TutorialSnapshot = {
       globalSettings: clone(useGlobalSettingsStore.getState().settings),
       dataDbVersion: useDataStore.getState().dbVersion,

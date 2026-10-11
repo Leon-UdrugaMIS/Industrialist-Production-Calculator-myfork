@@ -1599,7 +1599,7 @@
     "cost": 1500,
     "tier": 2,
     "size": {
-      "x": 22,
+      "x": 24,
       "y": 24
     },
     "variant": "none",
@@ -1839,8 +1839,8 @@
     "cost": 2400000,
     "tier": 4,
     "size": {
-      "x": 26,
-      "y": 8
+      "x": 52,
+      "y": 16
     },
     "variant": "none",
     "limited": false,

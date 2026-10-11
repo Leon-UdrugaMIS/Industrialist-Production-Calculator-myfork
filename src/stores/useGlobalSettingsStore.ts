@@ -1,8 +1,13 @@
 import { create } from 'zustand';
 import { getAllResearches } from '../data/lookup';
-import { DEFAULT_GAME_MONTH, type GameMonth } from '../types/globalSettings';
+import {
+  DEFAULT_GAME_MONTH,
+  isGameDifficulty,
+  type GameDifficulty,
+  type GameMonth,
+} from '../types/globalSettings';
 
-const ALWAYS_UNLOCKED_SEEDS: Record<string, string[]> = {
+const ALWAYS_UNLOCKED_SEEDS: Record<GameDifficulty, string[]> = {
   normal: [
     's_production_production',
     's_production_coal_extracting',
@@ -65,7 +70,7 @@ const ALWAYS_UNLOCKED_SEEDS: Record<string, string[]> = {
 export interface GlobalSettings {
   global_pollution: number;
   current_month: GameMonth;
-  difficulty: string;
+  difficulty: GameDifficulty;
   unlockedResearchIds: string[];
   oreNodesEnabled: boolean;
   showVariantLimited: boolean;
@@ -75,7 +80,7 @@ interface GlobalSettingsState {
   settings: GlobalSettings;
   setGlobalPollution: (value: number) => void;
   setCurrentMonth: (month: GameMonth) => void;
-  setDifficulty: (value: string) => void;
+  setDifficulty: (value: GameDifficulty) => void;
   setUnlockedResearchIds: (value: string[] | ((prev: string[]) => string[])) => void;
   setOreNodesEnabled: (value: boolean) => void;
   setShowVariantLimited: (value: boolean) => void;
@@ -109,8 +114,9 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>((set) => {
         if (state.settings.current_month === current_month) return state;
         return { settings: { ...state.settings, current_month } };
       }),
-    setDifficulty: (difficulty: string) =>
+    setDifficulty: (difficulty: GameDifficulty) =>
       set((state) => {
+        if (!isGameDifficulty(difficulty)) return state;
         if (state.settings.difficulty === difficulty) return state;
 
         let nextPollution = state.settings.global_pollution;
@@ -122,7 +128,7 @@ export const useGlobalSettingsStore = create<GlobalSettingsState>((set) => {
         if (difficulty === 'sandbox' || difficulty === 'sandbox_plus') {
           unlockedResearchIds = getAllResearches().map((r) => r.id);
         } else {
-          unlockedResearchIds = ALWAYS_UNLOCKED_SEEDS[difficulty] || ALWAYS_UNLOCKED_SEEDS.normal;
+          unlockedResearchIds = ALWAYS_UNLOCKED_SEEDS[difficulty];
         }
 
         const nextSettings = {

@@ -16,6 +16,24 @@ export interface NodeFlowResult {
 }
 export type FlowResults = Map<string, NodeFlowResult>;
 
+export interface TemperatureDiagnostics {
+  converged: boolean;
+  propagation: {
+    converged: boolean;
+    iterationsRun: number;
+    totalIterationsRun: number;
+    passesRun: number;
+    iterationLimit: number;
+    limitReached: boolean;
+  };
+  coupling: {
+    converged: boolean;
+    passesRun: number;
+    passLimit: number;
+    limitReached: boolean;
+  };
+}
+
 export interface SolverPort {
   type: 'output' | 'input';
   nodeId: string;

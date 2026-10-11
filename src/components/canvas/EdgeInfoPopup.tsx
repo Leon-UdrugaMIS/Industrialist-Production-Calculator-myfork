@@ -103,14 +103,17 @@ export function EdgeInfoPopup({ edgeId, anchorX, anchorY, onDismiss }: EdgeInfoP
   }, [anchorX, anchorY]);
 
   const navigateToMachine = async (nodeId: string) => {
-    const node = nodesMap.get(nodeId);
+    const nodes = useFlowStore.getState().nodes;
+    const node = nodes.find((item) => item.id === nodeId);
     if (!node) {
       onDismiss();
       return;
     }
 
     const collapsedParent =
-      isRecipeNode(node) && node.data.groupId ? nodesMap.get(node.data.groupId) : undefined;
+      isRecipeNode(node) && node.data.groupId
+        ? nodes.find((item) => item.id === node.data.groupId)
+        : undefined;
     const destination =
       isGroupNode(collapsedParent) && collapsedParent.data.collapsed ? collapsedParent : node;
     const x =

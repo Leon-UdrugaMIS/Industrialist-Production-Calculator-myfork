@@ -29,18 +29,25 @@ export interface GraphHistoryEntry<NodeType extends Node = Node, EdgeType extend
   edgeOrderAfter: string[];
 }
 
-export interface PositionHistoryEntry {
+export interface PositionEdgeRouteDiff<EdgeType extends Edge = Edge> {
+  id: string;
+  before: EdgeType;
+  after: EdgeType;
+}
+
+export interface PositionHistoryEntry<EdgeType extends Edge = Edge> {
   kind: 'position';
   positions: Array<{
     id: string;
     from: PositionSnapshot;
     to: PositionSnapshot;
   }>;
+  edgeRoutes: PositionEdgeRouteDiff<EdgeType>[];
 }
 
 export type HistoryEntry<NodeType extends Node = Node, EdgeType extends Edge = Edge> =
   | GraphHistoryEntry<NodeType, EdgeType>
-  | PositionHistoryEntry;
+  | PositionHistoryEntry<EdgeType>;
 
 function createMapById<EntityType extends { id: string }>(
   entities: readonly EntityType[],
@@ -248,11 +255,35 @@ export function applyGraphHistoryEntry<NodeType extends Node, EdgeType extends E
   };
 }
 
-export function applyPositionHistoryEntry<NodeType extends Node>(
-  entry: PositionHistoryEntry,
+function restoreEdgeRouteData<EdgeType extends Edge>(
+  currentEdge: EdgeType,
+  snapshotEdge: EdgeType,
+): EdgeType {
+  const currentData =
+    currentEdge.data && typeof currentEdge.data === 'object' ? { ...currentEdge.data } : {};
+  const snapshotData =
+    snapshotEdge.data && typeof snapshotEdge.data === 'object' ? snapshotEdge.data : undefined;
+
+  for (const key of ['controlPoints', 'orthogonalTurns'] as const) {
+    if (snapshotData && Object.prototype.hasOwnProperty.call(snapshotData, key)) {
+      currentData[key] = snapshotData[key];
+    } else {
+      delete currentData[key];
+    }
+  }
+
+  return {
+    ...currentEdge,
+    data: Object.keys(currentData).length > 0 ? currentData : undefined,
+  };
+}
+
+export function applyPositionHistoryEntry<NodeType extends Node, EdgeType extends Edge>(
+  entry: PositionHistoryEntry<EdgeType>,
   direction: 'undo' | 'redo',
   currentNodes: NodeType[],
-): NodeType[] {
+  currentEdges: EdgeType[],
+): { nodes: NodeType[]; edges: EdgeType[] } {
   const positionsById = new Map<string, PositionSnapshot>();
   for (let i = 0; i < entry.positions.length; i++) {
     const step = entry.positions[i];
@@ -276,5 +307,25 @@ export function applyPositionHistoryEntry<NodeType extends Node>(
     };
   }
 
-  return changed ? nextNodes : currentNodes;
+  const routeSnapshots = new Map(
+    entry.edgeRoutes.map((diff) => [diff.id, direction === 'undo' ? diff.before : diff.after]),
+  );
+  let edgesChanged = false;
+  const nextEdges = new Array<EdgeType>(currentEdges.length);
+  for (let i = 0; i < currentEdges.length; i++) {
+    const edge = currentEdges[i];
+    const snapshot = routeSnapshots.get(edge.id);
+    if (!snapshot) {
+      nextEdges[i] = edge;
+      continue;
+    }
+
+    edgesChanged = true;
+    nextEdges[i] = restoreEdgeRouteData(edge, snapshot);
+  }
+
+  return {
+    nodes: changed ? nextNodes : currentNodes,
+    edges: edgesChanged ? nextEdges : currentEdges,
+  };
 }

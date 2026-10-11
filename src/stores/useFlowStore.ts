@@ -213,6 +213,122 @@ const stripRouteData = (data: Edge['data']): Record<string, unknown> => {
   return nextData;
 };
 
+interface NodePositionDelta {
+  x: number;
+  y: number;
+}
+
+function getNodePositionDeltas(
+  beforeNodes: CanvasNode[],
+  afterNodes: CanvasNode[],
+): Map<string, NodePositionDelta> {
+  const beforeNodesById = createNodeMap(beforeNodes);
+  const deltas = new Map<string, NodePositionDelta>();
+
+  for (let i = 0; i < afterNodes.length; i++) {
+    const afterNode = afterNodes[i];
+    const beforeNode = beforeNodesById.get(afterNode.id);
+    if (!beforeNode) continue;
+
+    const delta = {
+      x: afterNode.position.x - beforeNode.position.x,
+      y: afterNode.position.y - beforeNode.position.y,
+    };
+    if ((delta.x !== 0 || delta.y !== 0) && Number.isFinite(delta.x) && Number.isFinite(delta.y)) {
+      deltas.set(afterNode.id, delta);
+    }
+  }
+
+  return deltas;
+}
+
+function isFiniteRoutePoint(value: unknown): value is { x: number; y: number } {
+  if (!value || typeof value !== 'object') return false;
+  const point = value as { x?: unknown; y?: unknown };
+  return (
+    typeof point.x === 'number' &&
+    Number.isFinite(point.x) &&
+    typeof point.y === 'number' &&
+    Number.isFinite(point.y)
+  );
+}
+
+function translateSelfLoopRoutes(edges: Edge[], deltas: Map<string, NodePositionDelta>): Edge[] {
+  let nextEdges = edges;
+
+  for (let i = 0; i < edges.length; i++) {
+    const edge = edges[i];
+    if (edge.source !== edge.target) continue;
+    const delta = deltas.get(edge.source);
+    if (!delta) continue;
+
+    const nextData: Record<string, unknown> = {
+      ...(edge.data as Record<string, unknown> | undefined),
+    };
+    let edgeChanged = false;
+
+    for (const key of ['controlPoints', 'orthogonalTurns'] as const) {
+      const points = nextData[key];
+      if (!Array.isArray(points)) continue;
+
+      let pointsChanged = false;
+      const nextPoints = points.map((point: unknown) => {
+        if (!isFiniteRoutePoint(point)) return point;
+        const x = point.x + delta.x;
+        const y = point.y + delta.y;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return point;
+        pointsChanged = true;
+        return { ...(point as Record<string, unknown>), x, y };
+      });
+
+      if (pointsChanged) {
+        nextData[key] = nextPoints;
+        edgeChanged = true;
+      }
+    }
+
+    if (edgeChanged) {
+      if (nextEdges === edges) nextEdges = edges.slice();
+      nextEdges[i] = { ...edge, data: nextData };
+    }
+  }
+
+  return nextEdges;
+}
+
+function areRouteFieldValuesEqual(before: unknown, after: unknown): boolean {
+  if (Object.is(before, after)) return true;
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) {
+    return false;
+  }
+
+  for (let i = 0; i < before.length; i++) {
+    const beforePoint: unknown = before[i];
+    const afterPoint: unknown = after[i];
+    if (Object.is(beforePoint, afterPoint)) continue;
+    if (!isFiniteRoutePoint(beforePoint) || !isFiniteRoutePoint(afterPoint)) return false;
+    if (beforePoint.x !== afterPoint.x || beforePoint.y !== afterPoint.y) return false;
+  }
+
+  return true;
+}
+
+function areEdgeRoutesEqual(before: Edge, after: Edge): boolean {
+  const beforeData = before.data as Record<string, unknown> | undefined;
+  const afterData = after.data as Record<string, unknown> | undefined;
+
+  for (const key of ['controlPoints', 'orthogonalTurns'] as const) {
+    const beforeHasField = !!beforeData && Object.prototype.hasOwnProperty.call(beforeData, key);
+    const afterHasField = !!afterData && Object.prototype.hasOwnProperty.call(afterData, key);
+    if (beforeHasField !== afterHasField) return false;
+    if (beforeHasField && !areRouteFieldValuesEqual(beforeData?.[key], afterData?.[key])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 const PLACEHOLDER_PRODUCT_IDS = new Set(['any_fluid', 'any_item']);
 
 const filterCompatibleRecipeEdges = (nodes: CanvasNode[], edges: Edge[]): Edge[] => {
@@ -862,6 +978,7 @@ const useFlowStore = create(
     let transactionDepth = 0;
     let transactionStart: { nodes: CanvasNode[]; edges: Edge[] } | null = null;
     let dragStartPositions: Map<string, PositionSnapshot> | null = null;
+    let dragStartLoopEdges: Map<string, Edge> | null = null;
 
     const pushHistoryEntry = (entry: HistoryEntry<CanvasNode, Edge> | null) => {
       if (!entry) return;
@@ -889,6 +1006,7 @@ const useFlowStore = create(
       transactionDepth = 0;
       transactionStart = null;
       dragStartPositions = null;
+      dragStartLoopEdges = null;
       set({
         historyPast: [],
         historyFuture: [],
@@ -924,16 +1042,14 @@ const useFlowStore = create(
             const nextFuture = [...state.historyFuture, entry];
 
             if (entry.kind === 'position') {
-              const nextNodes = syncAllGroupBounds(
-                clearTransientNodeSelectionState(
-                  applyPositionHistoryEntry(entry, 'undo', state.nodes),
-                ),
-              );
+              const applied = applyPositionHistoryEntry(entry, 'undo', state.nodes, state.edges);
+              const nextNodes = syncAllGroupBounds(clearTransientNodeSelectionState(applied.nodes));
               const nextIndexes = createNodeIndexes(nextNodes);
               return {
                 nodes: nextNodes,
                 nodesMap: nextIndexes.nodesMap,
                 groupMemberIds: nextIndexes.groupMemberIds,
+                edges: applied.edges,
                 historyPast: nextPast,
                 historyFuture: nextFuture,
                 canUndo: nextPast.length > 0,
@@ -976,16 +1092,14 @@ const useFlowStore = create(
             const nextPast = [...trimmedPast, entry];
 
             if (entry.kind === 'position') {
-              const nextNodes = syncAllGroupBounds(
-                clearTransientNodeSelectionState(
-                  applyPositionHistoryEntry(entry, 'redo', state.nodes),
-                ),
-              );
+              const applied = applyPositionHistoryEntry(entry, 'redo', state.nodes, state.edges);
+              const nextNodes = syncAllGroupBounds(clearTransientNodeSelectionState(applied.nodes));
               const nextIndexes = createNodeIndexes(nextNodes);
               return {
                 nodes: nextNodes,
                 nodesMap: nextIndexes.nodesMap,
                 groupMemberIds: nextIndexes.groupMemberIds,
+                edges: applied.edges,
                 historyPast: nextPast,
                 historyFuture: nextFuture,
                 canUndo: nextPast.length > 0,
@@ -1074,16 +1188,24 @@ const useFlowStore = create(
         }
 
         dragStartPositions = nextPositions.size > 0 ? nextPositions : null;
+        dragStartLoopEdges = new Map(
+          get()
+            .edges.filter((edge) => edge.source === edge.target)
+            .map((edge) => [edge.id, edge]),
+        );
       },
 
       commitDragStop: (nodeIds) => {
         if (isApplyingHistory || transactionDepth > 0) {
           dragStartPositions = null;
+          dragStartLoopEdges = null;
           return;
         }
 
         const startPositions = dragStartPositions;
+        const startLoopEdges = dragStartLoopEdges;
         dragStartPositions = null;
+        dragStartLoopEdges = null;
         if (!startPositions) return;
 
         const ids = new Set<string>();
@@ -1108,15 +1230,21 @@ const useFlowStore = create(
           );
           if (boundedNodes !== stateBeforeBoundsCommit.nodes) {
             const boundedIndexes = createNodeIndexes(boundedNodes);
+            const boundedEdges = translateSelfLoopRoutes(
+              stateBeforeBoundsCommit.edges,
+              getNodePositionDeltas(stateBeforeBoundsCommit.nodes, boundedNodes),
+            );
             set({
               nodes: boundedNodes,
               nodesMap: boundedIndexes.nodesMap,
               groupMemberIds: boundedIndexes.groupMemberIds,
+              edges: boundedEdges,
             });
           }
         }
 
-        const nodesById = createNodesMap(get().nodes);
+        const currentState = get();
+        const nodesById = createNodesMap(currentState.nodes);
         const positionDiffs: PositionHistoryEntry['positions'] = [];
         for (const id of ids) {
           const start = startPositions.get(id);
@@ -1133,10 +1261,31 @@ const useFlowStore = create(
           }
         }
 
-        if (positionDiffs.length === 0) return;
+        const edgesById = new Map(currentState.edges.map((edge) => [edge.id, edge]));
+        const edgeRoutes: PositionHistoryEntry['edgeRoutes'] = [];
+        for (const [id, before] of startLoopEdges ?? []) {
+          const after = edgesById.get(id);
+          if (!after || areEdgeRoutesEqual(before, after)) continue;
+          edgeRoutes.push({ id, before, after });
+        }
+
+        if (positionDiffs.length === 0) {
+          if (edgeRoutes.length > 0) {
+            const restored = applyPositionHistoryEntry(
+              { kind: 'position', positions: [], edgeRoutes },
+              'undo',
+              currentState.nodes,
+              currentState.edges,
+            );
+            set({ edges: restored.edges });
+          }
+          return;
+        }
+
         pushHistoryEntry({
           kind: 'position',
           positions: positionDiffs,
+          edgeRoutes,
         });
       },
 
@@ -1173,7 +1322,13 @@ const useFlowStore = create(
         }
 
         if (!changed) return;
-        set({ nodes: nextNodes });
+        set({
+          nodes: nextNodes,
+          edges: translateSelfLoopRoutes(
+            state.edges,
+            getNodePositionDeltas(state.nodes, nextNodes),
+          ),
+        });
       },
 
       toggleNodeSelection: (nodeId) => {
@@ -1355,11 +1510,16 @@ const useFlowStore = create(
           ? collectGroupNodeIds(finalNodes)
           : collectRecipeGroupIdsForNodeIds(finalNodes, dimensionChangedNodeIds);
         finalNodes = applyGroupBoundsForGroups(finalNodes, affectedGroupIds);
+        const nextEdges = translateSelfLoopRoutes(
+          state.edges,
+          getNodePositionDeltas(state.nodes, finalNodes),
+        );
 
         if (!hasStructuralChange) {
           const nextIndexes = affectedGroupIds.size > 0 ? createNodeIndexes(finalNodes) : undefined;
           set({
             nodes: finalNodes,
+            edges: nextEdges,
             ...(nextIndexes
               ? {
                   nodesMap: nextIndexes.nodesMap,
@@ -1373,15 +1533,14 @@ const useFlowStore = create(
         const nextIndexes = createNodeIndexes(finalNodes);
         set({
           nodes: finalNodes,
+          edges: nextEdges,
           nodesMap: nextIndexes.nodesMap,
           groupMemberIds: nextIndexes.groupMemberIds,
           graphVersion: state.graphVersion + 1,
         });
 
         if (!isApplyingHistory && transactionDepth === 0) {
-          pushHistoryEntry(
-            buildGraphHistoryEntry(state.nodes, state.edges, finalNodes, state.edges),
-          );
+          pushHistoryEntry(buildGraphHistoryEntry(state.nodes, state.edges, finalNodes, nextEdges));
         }
       },
 

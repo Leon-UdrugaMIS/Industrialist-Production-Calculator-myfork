@@ -118,7 +118,20 @@ export async function saveSave(record: SaveRecord): Promise<boolean> {
   try {
     const db = await getDB();
     if (!db) return false;
-    await db.put('saves', record);
+    const tx = db.transaction('saves', 'readwrite');
+    const existing = await tx.store.get(record.id);
+    if (
+      typeof existing?.data?.version === 'number' &&
+      existing.data.version > record.data.version
+    ) {
+      await tx.done;
+      console.warn(
+        `Refusing to overwrite save ${record.id}: stored version ${existing.data.version} is newer than incoming version ${record.data.version}.`,
+      );
+      return false;
+    }
+    await tx.store.put(record);
+    await tx.done;
     return true;
   } catch (err) {
     console.warn('Failed to save record to IndexedDB:', err);
@@ -163,7 +176,7 @@ export async function getAutosave(id = 'latest'): Promise<AutosaveRecord | null>
     return (await db.get('autosave', 'latest')) ?? null;
   } catch (err) {
     console.warn('Failed to get autosave from IndexedDB:', err);
-    return null;
+    throw err;
   }
 }
 
@@ -172,11 +185,20 @@ export async function saveAutosave(data: SaveData, id = 'latest'): Promise<void>
   if (!db) {
     throw new Error('IndexedDB not available');
   }
-  await db.put('autosave', {
+  const tx = db.transaction('autosave', 'readwrite');
+  const existing = await tx.store.get(id);
+  if (typeof existing?.data?.version === 'number' && existing.data.version > data.version) {
+    await tx.done;
+    throw new Error(
+      `Autosave version ${existing.data.version} is newer than this app supports. The original autosave was preserved.`,
+    );
+  }
+  await tx.store.put({
     id,
     timestamp: Date.now(),
     data,
   });
+  await tx.done;
 }
 
 export async function clearAllData(): Promise<void> {
@@ -227,13 +249,21 @@ export async function clearWikiBucketCache(): Promise<boolean> {
 }
 
 export async function getDataOverrides(): Promise<{ id: string; data: Record<string, unknown> }[]> {
+  const db = await getDB();
+  if (!db) {
+    throw new Error(
+      'IndexedDB is unavailable. Custom data overrides could not be read, so the save was not changed.',
+    );
+  }
+
   try {
-    const db = await getDB();
-    if (!db) return [];
     return await db.getAll('data_overrides');
   } catch (err) {
     console.warn('Failed to get data overrides from IndexedDB:', err);
-    return [];
+    throw new Error(
+      'Custom data overrides could not be read from IndexedDB, so the save was not changed.',
+      { cause: err },
+    );
   }
 }
 
@@ -261,10 +291,9 @@ export async function batchSaveDataOverrides(
     if (!db) return false;
     const tx = db.transaction('data_overrides', 'readwrite');
     const store = tx.objectStore('data_overrides');
-    for (let i = 0; i < entries.length; i++) {
-      store.put(entries[i]);
-    }
-    await tx.done;
+    const writes = await Promise.allSettled([tx.done, ...entries.map((entry) => store.put(entry))]);
+    const failedWrite = writes.find((result) => result.status === 'rejected');
+    if (failedWrite?.status === 'rejected') throw failedWrite.reason;
     return true;
   } catch (err) {
     console.warn('Failed to batch-save data overrides in IndexedDB:', err);

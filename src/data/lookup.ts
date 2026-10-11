@@ -452,6 +452,22 @@ export function initializeDatabase(): Promise<void> {
 
     applySpecialRecipeOverrides(overrides);
 
+    if (import.meta.env.DEV) {
+      const { validateFullDatabase } = await import('../utils/dataValidation');
+      const defaultValidation = validateFullDatabase(
+        defaultProducts,
+        defaultMachines,
+        defaultRecipes,
+        defaultResearches,
+      );
+      if (!defaultValidation.valid) {
+        console.error(
+          '[Data Validator] Built-in database contains schema violations.',
+          defaultValidation,
+        );
+      }
+    }
+
     rebuildActiveDatabase(overrides);
 
     const settingsStore = useGlobalSettingsStore.getState();

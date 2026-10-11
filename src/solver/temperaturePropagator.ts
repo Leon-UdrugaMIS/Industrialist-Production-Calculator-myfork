@@ -14,6 +14,7 @@ export interface TemperaturePropagationResult {
   converged: boolean;
 }
 
+export const MAX_TEMPERATURE_PROPAGATION_ITERATIONS = 80;
 const TEMPERATURE_CONVERGENCE_TOLERANCE = 1e-6;
 
 export function propagateTemperatures(
@@ -129,7 +130,7 @@ export function propagateTemperatures(
   let iterationsRun = 0;
   let converged = false;
 
-  for (let iter = 0; iter < 80; iter++) {
+  for (let iter = 0; iter < MAX_TEMPERATURE_PROPAGATION_ITERATIONS; iter++) {
     iterationsRun = iter + 1;
     const previousOutputTemps = Object.fromEntries(
       Object.entries(nodeOutputTemps).map(([nodeId, temperatures]) => [nodeId, [...temperatures]]),

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FlowResults, NodeFlowResult } from '../types/solver';
+import type { FlowResults, NodeFlowResult, TemperatureDiagnostics } from '../types/solver';
 import type { Recipe } from '../types/data';
 
 interface FlowResultState {
@@ -11,6 +11,7 @@ interface FlowResultState {
   nodeRecipes: Record<string, Recipe>;
   graphVersion: number;
   dataDbVersion: number;
+  temperatureDiagnostics: TemperatureDiagnostics | null;
   setResults: (
     results: FlowResults,
     edgeFlows: Record<string, number>,
@@ -20,6 +21,7 @@ interface FlowResultState {
     nodeRecipes: Record<string, Recipe>,
     graphVersion: number,
     dataDbVersion: number,
+    temperatureDiagnostics: TemperatureDiagnostics,
   ) => void;
 }
 
@@ -95,6 +97,26 @@ function areInputTempsEqual(
   return true;
 }
 
+function areTemperatureDiagnosticsEqual(
+  a: TemperatureDiagnostics | null,
+  b: TemperatureDiagnostics,
+): boolean {
+  if (!a) return false;
+  return (
+    a.converged === b.converged &&
+    a.propagation.converged === b.propagation.converged &&
+    a.propagation.iterationsRun === b.propagation.iterationsRun &&
+    a.propagation.totalIterationsRun === b.propagation.totalIterationsRun &&
+    a.propagation.passesRun === b.propagation.passesRun &&
+    a.propagation.iterationLimit === b.propagation.iterationLimit &&
+    a.propagation.limitReached === b.propagation.limitReached &&
+    a.coupling.converged === b.coupling.converged &&
+    a.coupling.passesRun === b.coupling.passesRun &&
+    a.coupling.passLimit === b.coupling.passLimit &&
+    a.coupling.limitReached === b.coupling.limitReached
+  );
+}
+
 const useFlowResultStore = create<FlowResultState>((set, get) => ({
   results: new Map(),
   edgeFlows: {},
@@ -104,6 +126,7 @@ const useFlowResultStore = create<FlowResultState>((set, get) => ({
   nodeRecipes: {},
   graphVersion: 0,
   dataDbVersion: 0,
+  temperatureDiagnostics: null,
   setResults: (
     newResults,
     newEdgeFlows,
@@ -113,6 +136,7 @@ const useFlowResultStore = create<FlowResultState>((set, get) => ({
     newNodeRecipes,
     newGraphVersion,
     newDataDbVersion,
+    newTemperatureDiagnostics,
   ) => {
     const oldState = get();
     const oldResults = oldState.results;
@@ -139,6 +163,10 @@ const useFlowResultStore = create<FlowResultState>((set, get) => ({
     const nodeRecipesChanged = !areRecordsEqual(oldState.nodeRecipes, newNodeRecipes);
     const graphVersionChanged = oldState.graphVersion !== newGraphVersion;
     const dataDbVersionChanged = oldState.dataDbVersion !== newDataDbVersion;
+    const temperatureDiagnosticsChanged = !areTemperatureDiagnosticsEqual(
+      oldState.temperatureDiagnostics,
+      newTemperatureDiagnostics,
+    );
 
     if (
       hasChanged ||
@@ -148,7 +176,8 @@ const useFlowResultStore = create<FlowResultState>((set, get) => ({
       resolvedProductsChanged ||
       nodeRecipesChanged ||
       graphVersionChanged ||
-      dataDbVersionChanged
+      dataDbVersionChanged ||
+      temperatureDiagnosticsChanged
     ) {
       set({
         results: updatedResults,
@@ -159,6 +188,7 @@ const useFlowResultStore = create<FlowResultState>((set, get) => ({
         nodeRecipes: newNodeRecipes,
         graphVersion: newGraphVersion,
         dataDbVersion: newDataDbVersion,
+        temperatureDiagnostics: newTemperatureDiagnostics,
       });
     }
   },

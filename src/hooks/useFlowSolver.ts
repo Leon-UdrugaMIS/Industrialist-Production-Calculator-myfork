@@ -3,9 +3,48 @@ import { useFlowStore } from '../stores/useFlowStore';
 import { useFlowResultStore } from '../stores/useFlowResultStore';
 import { useDataStore } from '../stores/useDataStore';
 import { useGlobalSettingsStore } from '../stores/useGlobalSettingsStore';
-import { solveFlowPipeline } from '../solver/solverPipeline';
+import {
+  createEmptyTemperatureDiagnostics,
+  solveFlowPipeline,
+  type SolverPipelineResult,
+} from '../solver/solverPipeline';
 import { SOLVER_DEBOUNCE_MS } from '../constants/layoutConstants';
 import { isRecipeNode } from '../types/nodes';
+import { areFlowResultVersionsCurrent } from '../utils/flowResultFreshness';
+
+export function commitFlowSolverResultIfCurrent(
+  result: SolverPipelineResult,
+  resultGraphVersion: number,
+  resultDataDbVersion: number,
+  currentGraphVersion: number,
+  currentDataDbVersion: number,
+): boolean {
+  if (
+    !areFlowResultVersionsCurrent(
+      resultGraphVersion,
+      resultDataDbVersion,
+      currentGraphVersion,
+      currentDataDbVersion,
+    )
+  ) {
+    return false;
+  }
+
+  useFlowResultStore
+    .getState()
+    .setResults(
+      result.results,
+      result.edgeFlows,
+      result.edgeTemps,
+      result.inputTemps,
+      result.resolvedProducts,
+      result.nodeRecipes,
+      resultGraphVersion,
+      resultDataDbVersion,
+      result.temperatureDiagnostics,
+    );
+  return true;
+}
 
 export function useFlowSolver(): void {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -31,26 +70,34 @@ export function useFlowSolver(): void {
         if (runToken !== runTokenRef.current) return;
         useFlowResultStore
           .getState()
-          .setResults(new Map(), {}, {}, {}, {}, {}, graphVersion, dataDbVersion);
+          .setResults(
+            new Map(),
+            {},
+            {},
+            {},
+            {},
+            {},
+            graphVersion,
+            dataDbVersion,
+            createEmptyTemperatureDiagnostics(),
+          );
         useFlowStore.getState().markSolutionCommitted();
         return;
       }
 
-      const { results, edgeFlows, edgeTemps, inputTemps, resolvedProducts, nodeRecipes } =
-        solveFlowPipeline(recipeNodes, recipeEdges, globalSettings);
+      const result = solveFlowPipeline(recipeNodes, recipeEdges, globalSettings);
       if (runToken !== runTokenRef.current) return;
-      useFlowResultStore
-        .getState()
-        .setResults(
-          results,
-          edgeFlows,
-          edgeTemps,
-          inputTemps,
-          resolvedProducts,
-          nodeRecipes,
+      if (
+        !commitFlowSolverResultIfCurrent(
+          result,
           graphVersion,
           dataDbVersion,
-        );
+          useFlowStore.getState().graphVersion,
+          useDataStore.getState().dbVersion,
+        )
+      ) {
+        return;
+      }
       useFlowStore.getState().markSolutionCommitted();
     }
 

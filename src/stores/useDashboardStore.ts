@@ -186,15 +186,21 @@ export const useDashboardStore = create<DashboardState>((set) => ({
         researchInfrastructure.researchStation2Count += fractionalResearchCount;
         researchInfrastructure.researchStation2CapCount += roundedCount;
         const productId =
-          resolvedProducts[buildHandleId(node.id, 'input', 0)] || recipe.inputs[0]?.product_id || '';
+          resolvedProducts[buildHandleId(node.id, 'input', 0)] ||
+          recipe.inputs[0]?.product_id ||
+          '';
         const product = getProduct(productId);
         researchInfrastructure.researchStation2ResearchValue +=
           (product?.rp_multiplier ?? 0) * fractionalResearchCount;
       } else if (recipe.id === 'r_research_station3_01') {
         const firstProductId =
-          resolvedProducts[buildHandleId(node.id, 'input', 0)] || recipe.inputs[0]?.product_id || '';
+          resolvedProducts[buildHandleId(node.id, 'input', 0)] ||
+          recipe.inputs[0]?.product_id ||
+          '';
         const secondProductId =
-          resolvedProducts[buildHandleId(node.id, 'input', 1)] || recipe.inputs[1]?.product_id || '';
+          resolvedProducts[buildHandleId(node.id, 'input', 1)] ||
+          recipe.inputs[1]?.product_id ||
+          '';
         const firstProduct = getProduct(firstProductId);
         const secondProduct = getProduct(secondProductId);
         const sameProduct = firstProductId !== '' && firstProductId === secondProductId;
@@ -203,8 +209,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           (sameProduct ? 0.7 : 1) *
           fractionalResearchCount;
         const hasStation4 = node.data.settings?.has_station_4 === 'Yes';
-        const hasRs4Buff =
-          hasStation4 && node.data.settings?.rs4_buff_active === 'Yes';
+        const hasRs4Buff = hasStation4 && node.data.settings?.rs4_buff_active === 'Yes';
         if (hasStation4) {
           researchInfrastructure.researchStation3With4Count += fractionalResearchCount;
           researchInfrastructure.researchStation4EffectiveAmount +=

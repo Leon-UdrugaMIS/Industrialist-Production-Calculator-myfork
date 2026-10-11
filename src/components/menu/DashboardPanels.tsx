@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { useUIStore } from '../../stores/useUIStore';
 import { useFlowStore } from '../../stores/useFlowStore';
+import { useFlowResultStore } from '../../stores/useFlowResultStore';
+import { useDataStore } from '../../stores/useDataStore';
 import { useGlobalSettingsStore } from '../../stores/useGlobalSettingsStore';
 import { GAME_MONTHS, type GameMonth } from '../../types/globalSettings';
 import { useDashboardStore, initDashboardStore } from '../../stores/useDashboardStore';
@@ -27,6 +29,7 @@ import {
   formatMachineSpace,
 } from '../../utils/unitFormatting';
 import { toggleSetValue } from '../../utils/setToggle';
+import { areFlowResultVersionsCurrent } from '../../utils/flowResultFreshness';
 import { VirtualList } from '../shared/VirtualList';
 import { ValidatedNumberInput } from '../shared/ValidatedNumberInput';
 import {
@@ -62,6 +65,34 @@ export function DashboardPanels() {
   const toggleExtendedMinimized = useUIStore((s) => s.toggleExtendedMinimized);
   const toggleGlobalSettingsMinimized = useUIStore((s) => s.toggleGlobalSettingsMinimized);
   const rateMode = useUIStore((s) => s.rateMode);
+  const graphVersion = useFlowStore((s) => s.graphVersion);
+  const resultGraphVersion = useFlowResultStore((s) => s.graphVersion);
+  const resultDataDbVersion = useFlowResultStore((s) => s.dataDbVersion);
+  const temperatureDiagnostics = useFlowResultStore((s) => s.temperatureDiagnostics);
+  const dataDbVersion = useDataStore((s) => s.dbVersion);
+  const hasCurrentFlowResult = areFlowResultVersionsCurrent(
+    resultGraphVersion,
+    resultDataDbVersion,
+    graphVersion,
+    dataDbVersion,
+  );
+  const temperatureWarning =
+    hasCurrentFlowResult && temperatureDiagnostics && !temperatureDiagnostics.converged
+      ? [
+          !temperatureDiagnostics.propagation.converged
+            ? temperatureDiagnostics.propagation.limitReached
+              ? `temperature propagation reached its ${temperatureDiagnostics.propagation.iterationLimit}-iteration limit`
+              : `temperature propagation did not converge after ${temperatureDiagnostics.propagation.iterationsRun} iterations`
+            : null,
+          !temperatureDiagnostics.coupling.converged
+            ? temperatureDiagnostics.coupling.limitReached
+              ? `temperature coupling reached its ${temperatureDiagnostics.coupling.passLimit}-pass limit`
+              : `temperature coupling did not settle after ${temperatureDiagnostics.coupling.passesRun} passes`
+            : null,
+        ]
+          .filter((reason): reason is string => reason !== null)
+          .join('; ')
+      : null;
 
   const globalPollution = useGlobalSettingsStore((s) => s.settings.global_pollution);
   const currentMonth = useGlobalSettingsStore((s) => s.settings.current_month);
@@ -219,12 +250,24 @@ export function DashboardPanels() {
           <span className={styles['panel-header-title']}>
             <Activity className={styles['panel-header-icon']} size={12} />
             Production Stats
+            {temperatureWarning && (
+              <span className={styles['calculation-warning']} title={temperatureWarning}>
+                <AlertTriangle size={10} /> Incomplete
+              </span>
+            )}
           </span>
           {isStatsMinimized ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
         </button>
 
         {!isStatsMinimized && (
           <div className={styles['panel-body']}>
+            {temperatureWarning && (
+              <div className={styles['calculation-warning-detail']} role="status">
+                {temperatureWarning}. Production results may have incomplete temperature values.
+                {temperatureDiagnostics &&
+                  ` Total propagation work: ${temperatureDiagnostics.propagation.totalIterationsRun} iterations across ${temperatureDiagnostics.propagation.passesRun} passes.`}
+              </div>
+            )}
             <div className={styles['stat-row']}>
               <span className={styles['stat-label']}>
                 <Zap size={10} /> MV Power Use

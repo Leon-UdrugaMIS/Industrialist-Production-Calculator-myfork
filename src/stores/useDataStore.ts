@@ -764,7 +764,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (editData._tombstone) continue;
       const existing = getResearch(id);
       const compiled = existing ? { ...existing, ...editData } : editData;
-      const validation = validateResearch(compiled);
+      const validation = validateResearch(compiled, validResearches);
       if (!validation.valid) {
         const errorMsg = validation.errors
           .map((err) => `- ${err.field}: ${err.message}`)

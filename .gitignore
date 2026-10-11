@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 tools/*
+!tools/check-design-rules.mjs
+!tools/calculation-validation.test.mjs
+!tools/production-flow.test.mjs
+!tools/persistence-storage.test.mjs
+!tools/save-migration.test.mjs
+!tools/design-rules-baseline.json
 # Local precision and solver diagnostics; retain on disk without committing.
 tools/autocomplete-precision-test.mjs
 tools/flow-precision-test.mjs

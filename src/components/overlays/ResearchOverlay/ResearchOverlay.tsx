@@ -26,8 +26,10 @@ import {
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { FlaskConical, Lock, Settings, Unlock, X } from 'lucide-react';
 import { getAllMachines, getAllResearches, getMachine } from '../../../data/lookup';
+import { getBlockedResearchIds } from '../../../data/researchRules';
 import { useUIStore } from '../../../stores/useUIStore';
 import { useGlobalSettingsStore } from '../../../stores/useGlobalSettingsStore';
+import { isGameDifficulty, type GameDifficulty } from '../../../types/globalSettings';
 import { useDashboardStore } from '../../../stores/useDashboardStore';
 import { useDataStore } from '../../../stores/useDataStore';
 import { ValidatedNumberInput } from '../../shared/ValidatedNumberInput';
@@ -71,8 +73,6 @@ const SOURCE_HANDLE_ID = 'source';
 const TARGET_HANDLE_ID = 'target';
 const EMPTY_GRAPH_NODES: Node<ResearchGraphNodeData>[] = [];
 const EMPTY_GRAPH_EDGES: Edge<ResearchGraphEdgeData>[] = [];
-
-type GameDifficulty = 'normal' | 'hard' | 'impossible' | 'impossible2' | 'sandbox' | 'sandbox_plus';
 
 const DIFFICULTY_LABELS: Record<GameDifficulty, string> = {
   normal: 'Normal',
@@ -151,53 +151,6 @@ const ALWAYS_UNLOCKED_SEEDS: Record<GameDifficulty, string[]> = {
   sandbox: [],
   sandbox_plus: [],
 };
-
-const BLOCKED_SEEDS: Record<GameDifficulty, string[]> = {
-  normal: [],
-  hard: [
-    's_energy_hand_crank',
-    's_energy_wind_turbine_1',
-    's_energy_geothermal_plant',
-    's_energy_solar_panel_2',
-  ],
-  impossible: [
-    's_production_advanced_copper_extraction',
-    's_production_advanced_coal_extraction',
-    's_energy_hand_crank',
-    's_energy_wind_turbine_1',
-    's_energy_geothermal_plant',
-    's_energy_lv_pole',
-    's_energy_energy_storage',
-    's_energy_solar_panel_2',
-    's_utility_scrubber',
-    's_utility_gold_item_storage_silo',
-    's_utility_gold_fluid_storage_silo',
-  ],
-  impossible2: [
-    's_production_advanced_copper_extraction',
-    's_production_advanced_coal_extraction',
-    's_energy_hand_crank',
-    's_energy_wind_turbine_1',
-    's_energy_geothermal_plant',
-    's_energy_lv_pole',
-    's_energy_energy_storage',
-    's_energy_solar_panel_2',
-    's_utility_scrubber',
-    's_utility_gold_item_storage_silo',
-    's_utility_gold_fluid_storage_silo',
-  ],
-  sandbox: [],
-  sandbox_plus: [],
-};
-
-function computeBlockedSet(seeds: string[], dependentsMap: Map<string, string[]>): Set<string> {
-  const blocked = new Set<string>();
-  for (let i = 0; i < seeds.length; i++) {
-    const reachable = collectReachable(seeds[i], dependentsMap);
-    reachable.forEach((id) => blocked.add(id));
-  }
-  return blocked;
-}
 
 const elk = new ELK();
 let categoryGraphCache: { dbVersion: number; graphs: CategoryGraphMap } | null = null;
@@ -315,30 +268,15 @@ interface ResearchTimeIntegral {
 }
 
 const GAUSS_KRONROD_15_ABSCISSAS = [
-  0.9914553711208126,
-  0.9491079123427585,
-  0.8648644233597691,
-  0.7415311855993945,
-  0.5860872354676911,
-  0.4058451513773972,
-  0.2077849550078985,
-  0,
+  0.9914553711208126, 0.9491079123427585, 0.8648644233597691, 0.7415311855993945,
+  0.5860872354676911, 0.4058451513773972, 0.2077849550078985, 0,
 ] as const;
 const GAUSS_KRONROD_15_WEIGHTS = [
-  0.02293532201052922,
-  0.06309209262997854,
-  0.1047900103222502,
-  0.1406532597155259,
-  0.1690047266392679,
-  0.1903505780647854,
-  0.2044329400752989,
-  0.2094821410847278,
+  0.02293532201052922, 0.06309209262997854, 0.1047900103222502, 0.1406532597155259,
+  0.1690047266392679, 0.1903505780647854, 0.2044329400752989, 0.2094821410847278,
 ] as const;
 const GAUSS_7_WEIGHTS = [
-  0.1294849661688697,
-  0.2797053914892767,
-  0.3818300505051189,
-  0.4179591836734694,
+  0.1294849661688697, 0.2797053914892767, 0.3818300505051189, 0.4179591836734694,
 ] as const;
 
 interface ResearchGraphInspection {
@@ -428,10 +366,7 @@ function calculateResearchProjection(
       absoluteDeviation > 0 && rawError > 0
         ? absoluteDeviation * Math.min(1, Math.pow((200 * rawError) / absoluteDeviation, 1.5))
         : rawError;
-    const estimatedError = Math.max(
-      scaledError,
-      50 * Number.EPSILON * absoluteSum * halfWidth,
-    );
+    const estimatedError = Math.max(scaledError, 50 * Number.EPSILON * absoluteSum * halfWidth);
     const width = endResearchPoints - startResearchPoints;
     const endpointInset = Math.min(
       width / 4,
@@ -475,7 +410,9 @@ function calculateResearchProjection(
           researchPoints >= startResearchPoints && researchPoints <= endResearchPoints,
       )
       .sort((left, right) => left - right)
-      .filter((researchPoints, index, sorted) => index === 0 || researchPoints !== sorted[index - 1]);
+      .filter(
+        (researchPoints, index, sorted) => index === 0 || researchPoints !== sorted[index - 1],
+      );
 
     const intervals: ResearchTimeInterval[] = [];
     for (let i = 0; i < breakpoints.length - 1; i++) {
@@ -524,10 +461,7 @@ function calculateResearchProjection(
 
       const interval = intervals[largestErrorIndex];
       const midpoint = (interval.startResearchPoints + interval.endResearchPoints) / 2;
-      if (
-        midpoint <= interval.startResearchPoints ||
-        midpoint >= interval.endResearchPoints
-      ) {
+      if (midpoint <= interval.startResearchPoints || midpoint >= interval.endResearchPoints) {
         return { intervals, failureReason: 'precision-limit' };
       }
 
@@ -625,7 +559,10 @@ function calculateResearchProjection(
   };
 }
 
-function interpolateResearchPoints(points: ResearchProjectionPoint[], elapsedSeconds: number): number {
+function interpolateResearchPoints(
+  points: ResearchProjectionPoint[],
+  elapsedSeconds: number,
+): number {
   if (points.length === 0) return 0;
   let nextIndex = 0;
   while (nextIndex < points.length && points[nextIndex].elapsedSeconds <= elapsedSeconds) {
@@ -636,8 +573,8 @@ function interpolateResearchPoints(points: ResearchProjectionPoint[], elapsedSec
   const next = points[nextIndex];
   if (!next || next.elapsedSeconds <= previous.elapsedSeconds) return previous.researchPoints;
 
-  const fraction = (elapsedSeconds - previous.elapsedSeconds) /
-    (next.elapsedSeconds - previous.elapsedSeconds);
+  const fraction =
+    (elapsedSeconds - previous.elapsedSeconds) / (next.elapsedSeconds - previous.elapsedSeconds);
   return previous.researchPoints + (next.researchPoints - previous.researchPoints) * fraction;
 }
 
@@ -1172,10 +1109,7 @@ function ResearchOverlayModal() {
   const setResearchTargetIds = useUIStore((s) => s.setResearchTargetIds);
   const researchProjectionMode = useUIStore((s) => s.researchProjectionMode);
   const setResearchProjectionMode = useUIStore((s) => s.setResearchProjectionMode);
-  const researchOutput = calculateResearchOutput(
-    researchInfrastructure,
-    currentResearchPoints,
-  );
+  const researchOutput = calculateResearchOutput(researchInfrastructure, currentResearchPoints);
 
   const setResearchOverlayOpen = useUIStore((state) => state.setResearchOverlayOpen);
   const [activeTab, setActiveTab] = useState<ResearchOverlayTab>('RP Calculator');
@@ -1187,7 +1121,9 @@ function ResearchOverlayModal() {
     end: number;
     projectionKey: string;
   } | null>(null);
-  const [inspectedProjection, setInspectedProjection] = useState<ResearchGraphInspection | null>(null);
+  const [inspectedProjection, setInspectedProjection] = useState<ResearchGraphInspection | null>(
+    null,
+  );
   const [isProjectionPanning, setIsProjectionPanning] = useState(false);
   const projectionDragRef = useRef<{
     svgX: number;
@@ -1196,7 +1132,8 @@ function ResearchOverlayModal() {
     moved: boolean;
   } | null>(null);
   const projectionChartRef = useRef<SVGSVGElement | null>(null);
-  const difficulty = useGlobalSettingsStore((s) => s.settings.difficulty) as GameDifficulty;
+  const storedDifficulty = useGlobalSettingsStore((s) => s.settings.difficulty);
+  const difficulty = isGameDifficulty(storedDifficulty) ? storedDifficulty : 'normal';
   const oreNodesEnabled = useGlobalSettingsStore((s) => s.settings.oreNodesEnabled);
   const showVariantLimited = useGlobalSettingsStore((s) => s.settings.showVariantLimited);
   const unlockedResearchIdsArray = useGlobalSettingsStore((s) => s.settings.unlockedResearchIds);
@@ -1282,7 +1219,7 @@ function ResearchOverlayModal() {
 
   const isSandbox = difficulty === 'sandbox' || difficulty === 'sandbox_plus';
   const alwaysUnlockedIds = new Set(ALWAYS_UNLOCKED_SEEDS[difficulty]);
-  const blockedIds = computeBlockedSet(BLOCKED_SEEDS[difficulty], dependentsById);
+  const blockedIds = getBlockedResearchIds(difficulty, dependentsById);
 
   const isSelectedAlwaysUnlocked = selectedResearch
     ? alwaysUnlockedIds.has(selectedResearch.id)
@@ -1494,31 +1431,29 @@ function ResearchOverlayModal() {
   const projectionEndX = projectionToX(projectionWindowEnd);
   const projectionEndY = projectionToY(projectionEndRp);
 
-  const zoomProjectionTime = useCallback((factor: number, anchor = 0.5) => {
-    const currentStart = projectionWindowStart;
-    const currentEnd = projectionWindowEnd;
-    const currentSpan = currentEnd - currentStart;
-    const nextSpan = Math.max(
-      Math.min(projectionFullTime, 0.001),
-      Math.min(projectionFullTime, currentSpan * factor),
-    );
-    const anchorTime = currentStart + currentSpan * anchor;
-    const nextStart = Math.max(
-      0,
-      Math.min(anchorTime - nextSpan * anchor, projectionFullTime - nextSpan),
-    );
-    setProjectionTimeWindow({
-      start: nextStart,
-      end: nextStart + nextSpan,
-      projectionKey: projectionStateKey,
-    });
-    setInspectedProjection(null);
-  }, [
-    projectionFullTime,
-    projectionStateKey,
-    projectionWindowEnd,
-    projectionWindowStart,
-  ]);
+  const zoomProjectionTime = useCallback(
+    (factor: number, anchor = 0.5) => {
+      const currentStart = projectionWindowStart;
+      const currentEnd = projectionWindowEnd;
+      const currentSpan = currentEnd - currentStart;
+      const nextSpan = Math.max(
+        Math.min(projectionFullTime, 0.001),
+        Math.min(projectionFullTime, currentSpan * factor),
+      );
+      const anchorTime = currentStart + currentSpan * anchor;
+      const nextStart = Math.max(
+        0,
+        Math.min(anchorTime - nextSpan * anchor, projectionFullTime - nextSpan),
+      );
+      setProjectionTimeWindow({
+        start: nextStart,
+        end: nextStart + nextSpan,
+        projectionKey: projectionStateKey,
+      });
+      setInspectedProjection(null);
+    },
+    [projectionFullTime, projectionStateKey, projectionWindowEnd, projectionWindowStart],
+  );
 
   const handleProjectionPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0) return;
@@ -1544,7 +1479,8 @@ function ResearchOverlayModal() {
       if (!drag.moved && Math.abs(pointerDelta) < 5) return;
       drag.moved = true;
       setIsProjectionPanning(true);
-      const delta = ((drag.svgX - svgX) / (projectionPlot.right - projectionPlot.left)) *
+      const delta =
+        ((drag.svgX - svgX) / (projectionPlot.right - projectionPlot.left)) *
         (drag.end - drag.start);
       const span = drag.end - drag.start;
       const start = Math.max(0, Math.min(drag.start + delta, projectionFullTime - span));
@@ -1574,7 +1510,8 @@ function ResearchOverlayModal() {
       (researchStep) =>
         elapsedSeconds >= researchStep.startSeconds && elapsedSeconds < researchStep.endSeconds,
     );
-    const researchName = step?.name ??
+    const researchName =
+      step?.name ??
       (researchProjectionMode === 'chain' &&
       researchProjection?.elapsedSeconds !== null &&
       researchProjection?.elapsedSeconds !== undefined &&
@@ -1622,10 +1559,7 @@ function ResearchOverlayModal() {
       if (svgX === null) return;
       const anchor = Math.max(
         0,
-        Math.min(
-          (svgX - projectionPlot.left) / (projectionPlot.right - projectionPlot.left),
-          1,
-        ),
+        Math.min((svgX - projectionPlot.left) / (projectionPlot.right - projectionPlot.left), 1),
       );
       zoomProjectionTime(event.deltaY < 0 ? 0.8 : 1.25, anchor);
     };
@@ -1704,7 +1638,8 @@ function ResearchOverlayModal() {
 
         {isSelectingTargetResearches && (
           <div className={styles['research-target-selection-banner']}>
-            Click locked researches to add or remove them as targets. Return to RP Calculator and click Finish target selection.
+            Click locked researches to add or remove them as targets. Return to RP Calculator and
+            click Finish target selection.
           </div>
         )}
 
@@ -1793,7 +1728,9 @@ function ResearchOverlayModal() {
                 </div>
                 <div>
                   <span>Efficiency</span>
-                  <strong>{formatResearchNumber(researchOutput.satelliteEfficiencyPercent)}%</strong>
+                  <strong>
+                    {formatResearchNumber(researchOutput.satelliteEfficiencyPercent)}%
+                  </strong>
                 </div>
                 <div>
                   <span>Dishes · canvas / optimal</span>
@@ -1844,7 +1781,9 @@ function ResearchOverlayModal() {
                       : 'Select target researches from the research graphs'
                   }
                 >
-                  {isSelectingTargetResearches ? 'Finish target selection' : 'Select target researches'}
+                  {isSelectingTargetResearches
+                    ? 'Finish target selection'
+                    : 'Select target researches'}
                 </button>
                 <span className={styles['research-chain-note']}>
                   Chain includes locked researches only
@@ -1913,7 +1852,8 @@ function ResearchOverlayModal() {
                   >
                     {!researchProjection
                       ? '—'
-                      : researchProjection.reachedTarget && researchProjection.elapsedSeconds !== null
+                      : researchProjection.reachedTarget &&
+                          researchProjection.elapsedSeconds !== null
                         ? `${researchProjection.failureReason === 'precision-limit' ? '≈' : ''}${formatLongTime(researchProjection.elapsedSeconds)}`
                         : researchProjection.failureReason === 'precision-limit'
                           ? 'Estimate did not converge'
@@ -1941,8 +1881,7 @@ function ResearchOverlayModal() {
                   {Array.from({ length: 9 }, (_, tick) => tick).map((tick) => {
                     const researchPoints =
                       projectionRpMin + ((projectionRpMax - projectionRpMin) * tick) / 8;
-                    const y =
-                      projectionToY(researchPoints);
+                    const y = projectionToY(researchPoints);
                     return (
                       <g key={`y-${tick}`}>
                         <line
@@ -2019,7 +1958,10 @@ function ResearchOverlayModal() {
                         const tooltipHeight = activeInspectedProjection.researchName ? 82 : 64;
                         const tooltipX = Math.max(
                           projectionPlot.left,
-                          Math.min(activeInspectedProjection.x + 10, projectionPlot.right - tooltipWidth),
+                          Math.min(
+                            activeInspectedProjection.x + 10,
+                            projectionPlot.right - tooltipWidth,
+                          ),
                         );
                         return (
                           <g transform={`translate(${tooltipX}, ${projectionPlot.top + 6})`}>
@@ -2029,17 +1971,34 @@ function ResearchOverlayModal() {
                               rx={3}
                               className={styles['research-projection-tooltip-bg']}
                             />
-                            <text x={9} y={15} className={styles['research-projection-tooltip-text']}>
+                            <text
+                              x={9}
+                              y={15}
+                              className={styles['research-projection-tooltip-text']}
+                            >
                               Time · {formatLongTime(activeInspectedProjection.elapsedSeconds)}
                             </text>
-                            <text x={9} y={31} className={styles['research-projection-tooltip-text']}>
+                            <text
+                              x={9}
+                              y={31}
+                              className={styles['research-projection-tooltip-text']}
+                            >
                               RP · {formatQuantity(activeInspectedProjection.researchPoints)}
                             </text>
-                            <text x={9} y={47} className={styles['research-projection-tooltip-text']}>
-                              RP{rpRateSuffix} · {formatQuantity(activeInspectedProjection.rpPerSecond)}
+                            <text
+                              x={9}
+                              y={47}
+                              className={styles['research-projection-tooltip-text']}
+                            >
+                              RP{rpRateSuffix} ·{' '}
+                              {formatQuantity(activeInspectedProjection.rpPerSecond)}
                             </text>
                             {activeInspectedProjection.researchName && (
-                              <text x={9} y={65} className={styles['research-projection-tooltip-text']}>
+                              <text
+                                x={9}
+                                y={65}
+                                className={styles['research-projection-tooltip-text']}
+                              >
                                 Researching · {activeInspectedProjection.researchName.slice(0, 28)}
                               </text>
                             )}
@@ -2074,7 +2033,6 @@ function ResearchOverlayModal() {
                 </div>
               )}
             </section>
-
           </div>
         ) : (
           <div className={styles['research-content']}>

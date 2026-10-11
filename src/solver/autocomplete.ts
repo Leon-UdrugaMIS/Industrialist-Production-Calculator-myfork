@@ -428,9 +428,7 @@ function applyCycleBranchRouteConstraints(
     const selectedEndpoints = inputHandle ? inputRoutes[inputHandle] : undefined;
     if (!selectedEndpoints) return true;
     const endpoint = edgeEndpointKey(edge);
-    return (
-      model.preservedEdgeEndpointKeys.has(endpoint) || selectedEndpoints.includes(endpoint)
-    );
+    return model.preservedEdgeEndpointKeys.has(endpoint) || selectedEndpoints.includes(endpoint);
   });
 }
 
@@ -1097,8 +1095,8 @@ function refreshSelectedCandidateRecipes(
       addedEdgeEndpoints: addedEdges.sample,
       removedEdgeEndpointCount: removedEdges.count,
       removedEdgeEndpoints: removedEdges.sample,
-      temperatureConverged: snapshot.temperatureConverged ?? true,
-      temperaturePropagationIterations: snapshot.iterationsRun,
+      temperatureConverged: snapshot.temperatureDiagnostics.converged,
+      temperaturePropagationIterations: snapshot.temperatureDiagnostics.propagation.iterationsRun,
       changed,
     },
   };
@@ -1429,7 +1427,7 @@ function buildInitialModel(
     candidates,
     edges: [],
     descriptorCatalog,
-    initialTemperatureConverged: currentSnapshot.temperatureConverged ?? true,
+    initialTemperatureConverged: currentSnapshot.temperatureDiagnostics.converged,
     protectedOutputHandles,
     fallbackKeys: new Set(),
     preservedEdgeEndpointKeys: new Set(existingEdges.map(edgeEndpointKey)),
@@ -1907,7 +1905,7 @@ function materializePlan(
     recipeEdges,
     globalSettings as unknown as Record<string, unknown>,
   );
-  if (!verification.temperatureConverged) {
+  if (!verification.temperatureDiagnostics.converged) {
     return { error: 'Temperature and recipe settings did not settle during graph verification.' };
   }
 
@@ -2024,9 +2022,13 @@ function getCycleBranchRoutes(
 function getCycleBranchDeficitHandles(
   deficientInputs: AutocompleteVerificationDeficit[] | undefined,
 ): string[] {
-  return [...new Set(
-    (deficientInputs ?? []).map((input) => buildHandleId(input.nodeId, 'input', input.inputIndex)),
-  )];
+  return [
+    ...new Set(
+      (deficientInputs ?? []).map((input) =>
+        buildHandleId(input.nodeId, 'input', input.inputIndex),
+      ),
+    ),
+  ];
 }
 
 async function recoverAutocompleteCycle(
@@ -2052,10 +2054,7 @@ async function recoverAutocompleteCycle(
     plan: AutocompletePlan;
   }> = [];
 
-  const enqueueAlternates = (
-    branch: AutocompleteCycleBranch,
-    deficitHandles: string[],
-  ) => {
+  const enqueueAlternates = (branch: AutocompleteCycleBranch, deficitHandles: string[]) => {
     for (const inputHandle of deficitHandles) {
       if (!changingInputHandles.includes(inputHandle)) continue;
       const currentRoute = JSON.stringify(branch.inputRoutes[inputHandle] ?? []);
@@ -2099,7 +2098,8 @@ async function recoverAutocompleteCycle(
       if (seenBranchStates.has(branchState)) {
         const lastAttempt = attempts[attempts.length - 1];
         if (lastAttempt?.pass === branch.solution.pass) {
-          lastAttempt.error = 'Recipe settings repeated within the branch before verification settled.';
+          lastAttempt.error =
+            'Recipe settings repeated within the branch before verification settled.';
         }
         break;
       }
@@ -2197,7 +2197,8 @@ async function recoverAutocompleteCycle(
       if (refresh.changed) {
         attempts.push({
           ...failureBase,
-          error: 'Recipe settings or routes changed after flow propagation; solving the branch again.',
+          error:
+            'Recipe settings or routes changed after flow propagation; solving the branch again.',
         });
         continue;
       }

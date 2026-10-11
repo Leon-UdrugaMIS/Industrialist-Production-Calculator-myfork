@@ -55,6 +55,22 @@
   gap: 6px;
 }
 
+.calculation-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--theme-color-text-error);
+  font-size: 9px;
+}
+
+.calculation-warning-detail {
+  padding: 6px;
+  border-left: 2px solid var(--theme-color-text-error);
+  color: var(--theme-color-text-error);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .panel-header-icon {
   color: var(--theme-color-primary);
 }

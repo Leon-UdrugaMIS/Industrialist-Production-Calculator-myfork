@@ -80,8 +80,20 @@ function DataOverlayModal() {
       Object.keys(nextPending.recipes).length > 0 ||
       Object.keys(nextPending.researches).length > 0;
     if (!stillHasUnsavedEdits && isTutorialActive()) {
-      const dataOverrides = await getDataOverrides();
-      completeTutorialAction({ type: 'data-save', dataOverrides });
+      try {
+        const dataOverrides = await getDataOverrides();
+        completeTutorialAction({ type: 'data-save', dataOverrides });
+      } catch (error) {
+        const detail =
+          error instanceof Error ? error.message : 'Custom database overrides could not be read.';
+        await useUIStore.getState().confirm({
+          title: 'TUTORIAL COULD NOT CONTINUE',
+          message: `${detail}\n\nYour edits were saved, but the tutorial step could not be recorded.`,
+          confirmLabel: 'OK',
+          showCancel: false,
+          intent: 'error',
+        });
+      }
     }
   };
 

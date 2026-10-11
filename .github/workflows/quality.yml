@@ -1,0 +1,47 @@
+name: Quality checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check design rules
+        run: npm run check:design-rules
+
+      - name: Check source and tooling formatting
+        run: npm run format:check
+
+      - name: Build production app
+        run: npm run build
+
+      - name: Test persistence migrations
+        run: npm run test:persistence
+
+      - name: Test calculation validation and production flow
+        run: npm run test:calculation
+
+      - name: Smoke test SCIP/WASM bundle
+        run: node tools/scip-wasm/smoke-test.mjs public/scip tools/scip-wasm/smoke-tests

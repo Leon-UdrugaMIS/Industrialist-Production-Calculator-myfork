@@ -102,9 +102,7 @@ export function calculateResearchOutput(
   infrastructure: ResearchInfrastructureStats,
   currentResearchPoints: number,
 ): ResearchOutputStats {
-  const currentRp = Number.isFinite(currentResearchPoints)
-    ? Math.max(0, currentResearchPoints)
-    : 0;
+  const currentRp = Number.isFinite(currentResearchPoints) ? Math.max(0, currentResearchPoints) : 0;
   const tier1Cap = calculateStationCap(1, infrastructure.researchStation1CapCount);
   const tier2Cap = calculateStationCap(2, infrastructure.researchStation2CapCount);
   const tier3Cap = calculateStationCap(3, infrastructure.researchStation3CapEffectiveAmount);
@@ -161,8 +159,7 @@ export function calculateResearchOutput(
     researchStation2RpPerSecond +
     researchStation3RpPerSecond +
     researchStation4RpPerSecond;
-  const satelliteBonusRpPerSecond =
-    preSatelliteRpPerSecond * (satelliteBoostPercent / 100);
+  const satelliteBonusRpPerSecond = preSatelliteRpPerSecond * (satelliteBoostPercent / 100);
   const currentRpPerSecond = preSatelliteRpPerSecond * satelliteMultiplier;
 
   return {

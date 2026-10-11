@@ -12,7 +12,6 @@
   border-radius: 7px;
   background: var(--theme-color-bg-secondary);
   color: var(--theme-color-text-secondary);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
   pointer-events: auto;
   font-size: 11px;
 }

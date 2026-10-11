@@ -56,7 +56,8 @@ npm run build        # TypeScript project build, then production Vite build
 npm run preview      # Serve the production build locally
 npm run lint         # ESLint checks for src/
 npm run format       # Format source files under src/
-npm run format:check # Check source formatting
+npm run format:check # Check source and tooling formatting
+npm run check:design-rules # Check CSS and TSX design rules
 ```
 
 The checked-in WebAssembly bundle is sufficient for local app development.

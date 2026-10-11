@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import { Trash2, RotateCcw } from 'lucide-react';
 import { getDataOverrides } from '../../../../persistence/idb';
+import { useUIStore } from '../../../../stores/useUIStore';
 import {
   canPerformTutorialAction,
   completeTutorialAction,
@@ -63,13 +64,25 @@ export function GenericDataFormShell({
     }
     await onRestore?.();
     if (isTutorialActive()) {
-      const dataOverrides = await getDataOverrides();
-      completeTutorialAction({
-        type: 'data-restore',
-        entity: entityKey,
-        id: entityId,
-        dataOverrides,
-      });
+      try {
+        const dataOverrides = await getDataOverrides();
+        completeTutorialAction({
+          type: 'data-restore',
+          entity: entityKey,
+          id: entityId,
+          dataOverrides,
+        });
+      } catch (error) {
+        const detail =
+          error instanceof Error ? error.message : 'Custom database overrides could not be read.';
+        await useUIStore.getState().confirm({
+          title: 'TUTORIAL COULD NOT CONTINUE',
+          message: `${detail}\n\nThe restore action may have completed, but the tutorial step could not be recorded.`,
+          confirmLabel: 'OK',
+          showCancel: false,
+          intent: 'error',
+        });
+      }
     }
   };
 

@@ -8,20 +8,19 @@
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border: 1px solid #68572c;
+  border: 1px solid var(--theme-color-border-primary);
   border-radius: 6px;
-  background: #1b1b1b;
-  color: #f1d77b;
+  background: var(--theme-color-bg-secondary);
+  color: var(--theme-color-warning);
   font-size: 13px;
-  box-shadow: 0 4px 18px #0008;
 }
 
 .status button {
   flex: 0 0 auto;
   padding: 6px 10px;
-  border: 1px solid #8c763e;
+  border: 1px solid var(--theme-color-border-light);
   border-radius: 4px;
-  background: #29251a;
+  background: var(--theme-color-secondary);
   color: inherit;
   cursor: pointer;
 }

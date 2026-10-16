@@ -83,12 +83,13 @@ interface FlowState {
   beginTransaction: () => void;
   endTransaction: () => void;
   runTransaction: (fn: () => void) => void;
-  captureDragStart: (nodeIds: string[]) => void;
+  captureDragStart: (nodeIds: string[], groupId?: string) => void;
   commitDragStop: (nodeIds: string[]) => void;
   moveNodesFromSnapshots: (
     startPositions: Map<string, PositionSnapshot>,
     deltaX: number,
     deltaY: number,
+    groupId?: string,
   ) => void;
   toggleNodeSelection: (nodeId: string) => void;
   clearNodeSelection: () => void;
@@ -253,13 +254,43 @@ function isFiniteRoutePoint(value: unknown): value is { x: number; y: number } {
   );
 }
 
-function translateSelfLoopRoutes(edges: Edge[], deltas: Map<string, NodePositionDelta>): Edge[] {
+function translateMovedRoutes(
+  edges: Edge[],
+  deltas: Map<string, NodePositionDelta>,
+  nodes: CanvasNode[],
+  groupId?: string,
+): Edge[] {
   let nextEdges = edges;
+  const nodesById = groupId ? createNodeMap(nodes) : null;
 
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
-    if (edge.source !== edge.target) continue;
-    const delta = deltas.get(edge.source);
+    if (edge.id.startsWith('proxy-')) continue;
+
+    let delta: NodePositionDelta | undefined;
+    if (edge.source === edge.target) {
+      delta = deltas.get(edge.source);
+    } else if (groupId && nodesById) {
+      const source = nodesById.get(edge.source);
+      const target = nodesById.get(edge.target);
+      if (
+        isRecipeNode(source) &&
+        isRecipeNode(target) &&
+        source.data.groupId === groupId &&
+        target.data.groupId === groupId
+      ) {
+        const sourceDelta = deltas.get(edge.source);
+        const targetDelta = deltas.get(edge.target);
+        if (
+          sourceDelta &&
+          targetDelta &&
+          sourceDelta.x === targetDelta.x &&
+          sourceDelta.y === targetDelta.y
+        ) {
+          delta = sourceDelta;
+        }
+      }
+    }
     if (!delta) continue;
 
     const nextData: Record<string, unknown> = {
@@ -978,7 +1009,8 @@ const useFlowStore = create(
     let transactionDepth = 0;
     let transactionStart: { nodes: CanvasNode[]; edges: Edge[] } | null = null;
     let dragStartPositions: Map<string, PositionSnapshot> | null = null;
-    let dragStartLoopEdges: Map<string, Edge> | null = null;
+    let dragStartRouteEdges: Map<string, Edge> | null = null;
+    let dragStartGroupId: string | undefined;
 
     const pushHistoryEntry = (entry: HistoryEntry<CanvasNode, Edge> | null) => {
       if (!entry) return;
@@ -1006,7 +1038,8 @@ const useFlowStore = create(
       transactionDepth = 0;
       transactionStart = null;
       dragStartPositions = null;
-      dragStartLoopEdges = null;
+      dragStartRouteEdges = null;
+      dragStartGroupId = undefined;
       set({
         historyPast: [],
         historyFuture: [],
@@ -1172,14 +1205,15 @@ const useFlowStore = create(
         }
       },
 
-      captureDragStart: (nodeIds) => {
+      captureDragStart: (nodeIds, groupId) => {
         const uniqueIds = new Set<string>();
         for (let i = 0; i < nodeIds.length; i++) {
           uniqueIds.add(nodeIds[i]);
         }
         if (uniqueIds.size === 0) return;
 
-        const nodesById = createNodesMap(get().nodes);
+        const nodes = get().nodes;
+        const nodesById = createNodesMap(nodes);
         const nextPositions = new Map<string, PositionSnapshot>();
         for (const id of uniqueIds) {
           const node = nodesById.get(id);
@@ -1188,9 +1222,22 @@ const useFlowStore = create(
         }
 
         dragStartPositions = nextPositions.size > 0 ? nextPositions : null;
-        dragStartLoopEdges = new Map(
+        dragStartGroupId = groupId;
+        dragStartRouteEdges = new Map(
           get()
-            .edges.filter((edge) => edge.source === edge.target)
+            .edges.filter((edge) => {
+              if (edge.id.startsWith('proxy-')) return false;
+              if (edge.source === edge.target) return true;
+              if (!groupId) return false;
+              const source = nodesById.get(edge.source);
+              const target = nodesById.get(edge.target);
+              return (
+                isRecipeNode(source) &&
+                isRecipeNode(target) &&
+                source.data.groupId === groupId &&
+                target.data.groupId === groupId
+              );
+            })
             .map((edge) => [edge.id, edge]),
         );
       },
@@ -1198,14 +1245,17 @@ const useFlowStore = create(
       commitDragStop: (nodeIds) => {
         if (isApplyingHistory || transactionDepth > 0) {
           dragStartPositions = null;
-          dragStartLoopEdges = null;
+          dragStartRouteEdges = null;
+          dragStartGroupId = undefined;
           return;
         }
 
         const startPositions = dragStartPositions;
-        const startLoopEdges = dragStartLoopEdges;
+        const startRouteEdges = dragStartRouteEdges;
+        const groupId = dragStartGroupId;
         dragStartPositions = null;
-        dragStartLoopEdges = null;
+        dragStartRouteEdges = null;
+        dragStartGroupId = undefined;
         if (!startPositions) return;
 
         const ids = new Set<string>();
@@ -1230,9 +1280,11 @@ const useFlowStore = create(
           );
           if (boundedNodes !== stateBeforeBoundsCommit.nodes) {
             const boundedIndexes = createNodeIndexes(boundedNodes);
-            const boundedEdges = translateSelfLoopRoutes(
+            const boundedEdges = translateMovedRoutes(
               stateBeforeBoundsCommit.edges,
               getNodePositionDeltas(stateBeforeBoundsCommit.nodes, boundedNodes),
+              boundedNodes,
+              groupId,
             );
             set({
               nodes: boundedNodes,
@@ -1263,7 +1315,7 @@ const useFlowStore = create(
 
         const edgesById = new Map(currentState.edges.map((edge) => [edge.id, edge]));
         const edgeRoutes: PositionHistoryEntry['edgeRoutes'] = [];
-        for (const [id, before] of startLoopEdges ?? []) {
+        for (const [id, before] of startRouteEdges ?? []) {
           const after = edgesById.get(id);
           if (!after || areEdgeRoutesEqual(before, after)) continue;
           edgeRoutes.push({ id, before, after });
@@ -1289,7 +1341,7 @@ const useFlowStore = create(
         });
       },
 
-      moveNodesFromSnapshots: (startPositions, deltaX, deltaY) => {
+      moveNodesFromSnapshots: (startPositions, deltaX, deltaY, groupId) => {
         if (startPositions.size === 0) return;
 
         const state = get();
@@ -1322,11 +1374,16 @@ const useFlowStore = create(
         }
 
         if (!changed) return;
+        const nextIndexes = createNodeIndexes(nextNodes);
         set({
           nodes: nextNodes,
-          edges: translateSelfLoopRoutes(
+          nodesMap: nextIndexes.nodesMap,
+          groupMemberIds: nextIndexes.groupMemberIds,
+          edges: translateMovedRoutes(
             state.edges,
             getNodePositionDeltas(state.nodes, nextNodes),
+            nextNodes,
+            groupId,
           ),
         });
       },
@@ -1510,9 +1567,10 @@ const useFlowStore = create(
           ? collectGroupNodeIds(finalNodes)
           : collectRecipeGroupIdsForNodeIds(finalNodes, dimensionChangedNodeIds);
         finalNodes = applyGroupBoundsForGroups(finalNodes, affectedGroupIds);
-        const nextEdges = translateSelfLoopRoutes(
+        const nextEdges = translateMovedRoutes(
           state.edges,
           getNodePositionDeltas(state.nodes, finalNodes),
+          finalNodes,
         );
 
         if (!hasStructuralChange) {

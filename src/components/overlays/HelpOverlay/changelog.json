@@ -5,6 +5,18 @@
     "patches": [
       {
         "hash": "pending",
+        "version": "v0.8.12",
+        "patch": 12,
+        "date": "2026-10-17",
+        "subject": "Restore autosaves reliably and keep group edge routes aligned",
+        "items": [
+          "Autosave restore keeps the startup tab identity stable through PWA tab collisions and can recover the newest changed save when a tab has no saved slot.",
+          "Storage read failures can be retried without replacing the preserved autosave.",
+          "Edges between members of a moved group now follow the group, and position undo and redo restore their routes."
+        ]
+      },
+      {
+        "hash": "pending",
         "version": "v0.8.11",
         "patch": 11,
         "date": "2026-10-12",

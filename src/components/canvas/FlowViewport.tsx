@@ -274,6 +274,7 @@ interface BatchDragState {
   startPositions: Map<string, { x: number; y: number }>;
   draggedNodeId: string;
   draggedStartPosition: { x: number; y: number };
+  groupId?: string;
   groupPreview: GroupBoundsPreviewState | null;
 }
 
@@ -539,10 +540,11 @@ function FlowViewportCanvas({ isZoomedOut }: FlowViewportCanvasProps) {
       startPositions,
       draggedNodeId: node.id,
       draggedStartPosition,
+      groupId: shouldDragGroup ? node.id : undefined,
       groupPreview,
     };
 
-    captureDragStart(nodeIds);
+    captureDragStart(nodeIds, shouldDragGroup ? node.id : undefined);
   };
 
   const handleNodeDrag = (_event: React.MouseEvent, node: Node) => {
@@ -565,7 +567,7 @@ function FlowViewportCanvas({ isZoomedOut }: FlowViewportCanvasProps) {
     }
 
     if (batchDrag.nodeIds.length > 1) {
-      moveNodesFromSnapshots(batchDrag.startPositions, deltaX, deltaY);
+      moveNodesFromSnapshots(batchDrag.startPositions, deltaX, deltaY, batchDrag.groupId);
     }
 
     requestTutorialDriverRefresh();

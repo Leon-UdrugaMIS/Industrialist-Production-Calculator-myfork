@@ -17,6 +17,8 @@ tools/*
 !tools/production-flow.test.mjs
 !tools/persistence-storage.test.mjs
 !tools/save-migration.test.mjs
+!tools/autosave-schema.test.mjs
+!tools/flow-store-history.test.mjs
 !tools/design-rules-baseline.json
 # Local precision and solver diagnostics; retain on disk without committing.
 tools/autocomplete-precision-test.mjs

@@ -1,7 +1,7 @@
 {
   "name": "industrialist-calculator",
   "private": true,
-  "version": "0.8.11",
+  "version": "0.8.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\" && npm run format:check:tooling",
     "format:check:tooling": "prettier --check \"package.json\" \".github/workflows/quality.yml\" \"tools/*.mjs\" \"tools/design-rules-baseline.json\"",
-    "test:persistence": "node --test --test-concurrency=1 tools/save-migration.test.mjs tools/persistence-storage.test.mjs",
+    "test:persistence": "node --test --test-concurrency=1 tools/save-migration.test.mjs tools/persistence-storage.test.mjs tools/autosave-schema.test.mjs",
+    "test:graph": "node --test --test-concurrency=1 tools/flow-store-history.test.mjs",
     "test:calculation": "node --test tools/calculation-validation.test.mjs && node --test tools/production-flow.test.mjs",
     "check:design-rules": "node tools/check-design-rules.mjs",
     "preview": "vite preview"

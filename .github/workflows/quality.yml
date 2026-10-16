@@ -40,6 +40,9 @@ jobs:
       - name: Test persistence migrations
         run: npm run test:persistence
 
+      - name: Test graph position history
+        run: npm run test:graph
+
       - name: Test calculation validation and production flow
         run: npm run test:calculation
 

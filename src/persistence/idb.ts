@@ -1,4 +1,4 @@
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction } from 'idb';
 import type { SaveData, SaveRecord, AutosaveRecord } from '../types/saves';
 
 interface SavesDB extends DBSchema {
@@ -9,6 +9,10 @@ interface SavesDB extends DBSchema {
   autosave: {
     key: string;
     value: AutosaveRecord;
+  };
+  autosave_meta: {
+    key: string;
+    value: { key: string; autosaveId: string; modifiedAt: number };
   };
   data_overrides: {
     key: string;
@@ -21,7 +25,8 @@ interface SavesDB extends DBSchema {
 }
 
 const DB_NAME = 'industrialist_saves_db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+const LATEST_AUTOSAVE_POINTER_KEY = 'latest';
 
 export interface WikiBucketCacheRecord {
   id: string;
@@ -72,6 +77,9 @@ function getDB(): Promise<IDBPDatabase<SavesDB> | null> {
             if (!db.objectStoreNames.contains('wiki_bucket_cache')) {
               db.createObjectStore('wiki_bucket_cache', { keyPath: 'id' });
             }
+          }
+          if (oldVersion < 4) {
+            db.createObjectStore('autosave_meta', { keyPath: 'key' });
           }
         },
         blocking() {
@@ -167,37 +175,175 @@ export async function renameSave(id: string, newName: string): Promise<boolean> 
   }
 }
 
+export interface AutosaveWriteOptions {
+  modifiedAt?: number;
+  publishLatest?: boolean;
+}
+
+function getAutosaveModifiedAt(record: AutosaveRecord): number {
+  if (typeof record.modifiedAt === 'number' && Number.isFinite(record.modifiedAt)) {
+    return record.modifiedAt;
+  }
+  return typeof record.timestamp === 'number' && Number.isFinite(record.timestamp)
+    ? record.timestamp
+    : 0;
+}
+
+function isNewerAutosave(
+  candidate: { autosaveId: string; modifiedAt: number },
+  current: { autosaveId: string; modifiedAt: number } | null,
+): boolean {
+  if (!current) return true;
+  if (candidate.modifiedAt !== current.modifiedAt) {
+    return candidate.modifiedAt > current.modifiedAt;
+  }
+  return candidate.autosaveId.localeCompare(current.autosaveId) < 0;
+}
+
+async function ensureLatestAutosavePointer(
+  tx: IDBPTransaction<SavesDB, ['autosave', 'autosave_meta'], 'readwrite'>,
+): Promise<{ key: string; autosaveId: string; modifiedAt: number } | null> {
+  const autosaves = tx.objectStore('autosave');
+  const metadata = tx.objectStore('autosave_meta');
+  const pointer = await metadata.get(LATEST_AUTOSAVE_POINTER_KEY);
+  if (pointer?.autosaveId === '') return null;
+  if (pointer && (await autosaves.get(pointer.autosaveId))) return pointer;
+
+  const records = await autosaves.getAll();
+  let newest: AutosaveRecord | null = null;
+  for (const record of records) {
+    const candidate = {
+      autosaveId: record.id,
+      modifiedAt: getAutosaveModifiedAt(record),
+    };
+    if (
+      isNewerAutosave(
+        candidate,
+        newest ? { autosaveId: newest.id, modifiedAt: getAutosaveModifiedAt(newest) } : null,
+      )
+    ) {
+      newest = record;
+    }
+  }
+
+  if (!newest) {
+    await metadata.put({
+      key: LATEST_AUTOSAVE_POINTER_KEY,
+      autosaveId: '',
+      modifiedAt: 0,
+    });
+    return null;
+  }
+
+  const seededPointer = {
+    key: LATEST_AUTOSAVE_POINTER_KEY,
+    autosaveId: newest.id,
+    modifiedAt: getAutosaveModifiedAt(newest),
+  };
+  await metadata.put(seededPointer);
+  return seededPointer;
+}
+
 export async function getAutosave(id = 'latest'): Promise<AutosaveRecord | null> {
   try {
     const db = await getDB();
-    if (!db) return null;
-    const record = await db.get('autosave', id);
-    if (record || id === 'latest') return record ?? null;
-    return (await db.get('autosave', 'latest')) ?? null;
+    if (!db) {
+      throw new Error('IndexedDB is unavailable, so the browser autosave could not be read.');
+    }
+    const tx = db.transaction(['autosave', 'autosave_meta'] as const, 'readwrite');
+    const autosaves = tx.objectStore('autosave');
+    const exactRecord = await autosaves.get(id);
+    const pointer = await ensureLatestAutosavePointer(tx);
+    const record = exactRecord ?? (pointer ? await autosaves.get(pointer.autosaveId) : undefined);
+    await tx.done;
+    return record ?? null;
   } catch (err) {
     console.warn('Failed to get autosave from IndexedDB:', err);
     throw err;
   }
 }
 
-export async function saveAutosave(data: SaveData, id = 'latest'): Promise<void> {
+export async function saveAutosave(
+  data: SaveData,
+  id = 'latest',
+  options: AutosaveWriteOptions = {},
+): Promise<void> {
   const db = await getDB();
   if (!db) {
     throw new Error('IndexedDB not available');
   }
-  const tx = db.transaction('autosave', 'readwrite');
-  const existing = await tx.store.get(id);
+  const tx = db.transaction(['autosave', 'autosave_meta'] as const, 'readwrite');
+  const autosaves = tx.objectStore('autosave');
+  const metadata = tx.objectStore('autosave_meta');
+  const existing = await autosaves.get(id);
   if (typeof existing?.data?.version === 'number' && existing.data.version > data.version) {
     await tx.done;
     throw new Error(
       `Autosave version ${existing.data.version} is newer than this app supports. The original autosave was preserved.`,
     );
   }
-  await tx.store.put({
+
+  const pointer = await ensureLatestAutosavePointer(tx);
+  const pointerRecord = pointer ? await autosaves.get(pointer.autosaveId) : undefined;
+  const modifiedAt = options.modifiedAt ?? Date.now();
+  const record: AutosaveRecord = {
     id,
     timestamp: Date.now(),
+    modifiedAt,
     data,
-  });
+  };
+  await autosaves.put(record);
+
+  const pointerIsFutureVersion =
+    typeof pointerRecord?.data?.version === 'number' && pointerRecord.data.version > data.version;
+  const candidatePointer = { autosaveId: id, modifiedAt };
+  const currentPointer = pointer
+    ? { autosaveId: pointer.autosaveId, modifiedAt: pointer.modifiedAt }
+    : null;
+  if (
+    options.publishLatest !== false &&
+    !pointerIsFutureVersion &&
+    isNewerAutosave(candidatePointer, currentPointer)
+  ) {
+    await metadata.put({
+      key: LATEST_AUTOSAVE_POINTER_KEY,
+      ...candidatePointer,
+    });
+  }
+  await tx.done;
+}
+
+export async function publishAutosaveAsLatest(id: string): Promise<void> {
+  const db = await getDB();
+  if (!db) throw new Error('IndexedDB not available');
+
+  const tx = db.transaction(['autosave', 'autosave_meta'] as const, 'readwrite');
+  const autosaves = tx.objectStore('autosave');
+  const metadata = tx.objectStore('autosave_meta');
+  const record = await autosaves.get(id);
+  if (!record) {
+    await tx.done;
+    throw new Error(`Autosave ${id} could not be published because its record is missing.`);
+  }
+
+  const pointer = await ensureLatestAutosavePointer(tx);
+  const pointerRecord = pointer ? await autosaves.get(pointer.autosaveId) : undefined;
+  const pointerIsFutureVersion =
+    typeof pointerRecord?.data?.version === 'number' &&
+    pointerRecord.data.version > record.data.version;
+  const candidatePointer = {
+    autosaveId: record.id,
+    modifiedAt: getAutosaveModifiedAt(record),
+  };
+  const currentPointer = pointer
+    ? { autosaveId: pointer.autosaveId, modifiedAt: pointer.modifiedAt }
+    : null;
+  if (!pointerIsFutureVersion && isNewerAutosave(candidatePointer, currentPointer)) {
+    await metadata.put({
+      key: LATEST_AUTOSAVE_POINTER_KEY,
+      ...candidatePointer,
+    });
+  }
   await tx.done;
 }
 
@@ -207,6 +353,7 @@ export async function clearAllData(): Promise<void> {
 
   await Promise.all([
     db.clear('autosave'),
+    db.clear('autosave_meta'),
     db.clear('data_overrides'),
     db.clear('wiki_bucket_cache'),
   ]);

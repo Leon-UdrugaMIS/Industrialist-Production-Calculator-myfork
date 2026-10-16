@@ -67,5 +67,6 @@ export interface SaveRecord {
 export interface AutosaveRecord {
   id: string;
   timestamp: number;
+  modifiedAt?: number;
   data: SaveData;
 }

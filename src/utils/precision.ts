@@ -92,6 +92,11 @@ export function ceilMachineCount(value: number): number {
   return Math.ceil(value);
 }
 
+export function roundMachineCount(value: number): number {
+  if (!Number.isFinite(value) || value <= RATE_NUMERICAL_ZERO) return 0;
+  return Math.max(0, Math.round(value));
+}
+
 export function getScaledTolerance(
   a: number,
   b = 0,

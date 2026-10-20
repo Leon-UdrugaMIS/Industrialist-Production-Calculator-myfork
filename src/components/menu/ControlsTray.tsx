@@ -6,6 +6,7 @@ import {
   Target,
   Network,
   Cpu,
+  Hash,
   Sparkles,
   FlaskConical,
   Clock,
@@ -21,6 +22,8 @@ import { useFlowStore } from '../../stores/useFlowStore';
 import { useEdgeThemeStore } from '../../stores/useEdgeThemeStore';
 import { isRatioOptimizerRunning } from '../../solver/ratioOptimizer';
 import { isRecipeNode } from '../../types/nodes';
+import { sanitizeMachineCountConstraint } from '../../utils/machineCountConstraint';
+import { roundMachineCount } from '../../utils/precision';
 import {
   canPerformTutorialAction,
   completeTutorialAction,
@@ -82,6 +85,13 @@ const BUTTONS: ButtonConfig[] = [
     dividerBottom: true,
   },
   {
+    id: 'round_machines',
+    label: 'Round Machines',
+    type: 'action',
+    Icon: Hash,
+    dividerBottom: true,
+  },
+  {
     id: 'coming_soon',
     label: 'Coming Soon',
     type: 'action',
@@ -122,6 +132,7 @@ export function ControlsTray() {
   const cycleRateMode = useUIStore((s) => s.cycleRateMode);
   const toggleMinimized = useUIStore((s) => s.toggleControlsMinimized);
   const nodeCount = useFlowStore((s) => s.nodes.length);
+  const recipeNodeCount = useFlowStore((s) => s.nodes.filter(isRecipeNode).length);
   const canUndo = useFlowStore((s) => s.canUndo);
   const canRedo = useFlowStore((s) => s.canRedo);
   const undo = useFlowStore((s) => s.undo);
@@ -208,6 +219,24 @@ export function ControlsTray() {
       }
       useUIStore.getState().setIsLPSolverOpen(true);
       completeTutorialAction({ type: 'control', id: 'compute' });
+    } else if (btn.id === 'round_machines') {
+      const flowStore = useFlowStore.getState();
+      flowStore.runTransaction(() => {
+        for (const node of flowStore.nodes) {
+          if (!isRecipeNode(node)) continue;
+          const constraint = sanitizeMachineCountConstraint(node.data.machineCountConstraint);
+          if (constraint?.kind === 'locked') continue;
+
+          let roundedCount = roundMachineCount(node.data.machineCount);
+          if (constraint?.kind === 'capped') {
+            roundedCount = Math.min(roundedCount, Math.floor(constraint.value));
+          }
+          if (roundedCount !== node.data.machineCount) {
+            flowStore.updateNodeData(node.id, { machineCount: roundedCount });
+          }
+        }
+      });
+      completeTutorialAction({ type: 'control', id: 'round_machines' });
     } else if (btn.id === 'coming_soon') {
       void useUIStore.getState().confirm({
         title: 'Coming Soon',
@@ -297,12 +326,14 @@ export function ControlsTray() {
             const isHistoryDisabled =
               (btn.id === 'undo' && !canUndo) || (btn.id === 'redo' && !canRedo);
             const isLayoutDisabled = btn.id === 'layout' && (isLayouting || nodeCount === 0);
+            const isRoundMachinesDisabled = btn.id === 'round_machines' && recipeNodeCount === 0;
             const isAddGroupDisabled =
               btn.id === 'add_recipe' && isAddGroupMode && !hasGroupableSelection;
             const isDisabled =
               UNWIRED_IDS.has(btn.id) ||
               isHistoryDisabled ||
               isLayoutDisabled ||
+              isRoundMachinesDisabled ||
               isAddGroupDisabled;
             const isToggled =
               !isDisabled &&

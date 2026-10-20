@@ -16,6 +16,8 @@ const flowSolver = await viteServer.ssrLoadModule('/src/solver/flowSolver.ts');
 const idGenerator = await viteServer.ssrLoadModule('/src/utils/idGenerator.ts');
 const precision = await viteServer.ssrLoadModule('/src/utils/precision.ts');
 const registry = await viteServer.ssrLoadModule('/src/data/registry.ts');
+const optimizationConfig = await viteServer.ssrLoadModule('/src/solver/optimizationConfig.ts');
+const ratioOptimizerWorker = await viteServer.ssrLoadModule('/src/solver/ratioOptimizerWorker.ts');
 
 after(async () => {
   registry.setSpecialRecipeOverrides({}, []);
@@ -492,9 +494,52 @@ test('precision utilities preserve their zero, rate, deficit, excess, and machin
   assert.equal(precision.isMachineCountNearInteger(1 + integerTolerance * 2), false);
   assert.equal(precision.ceilMachineCount(1 + integerTolerance), 1);
   assert.equal(precision.ceilMachineCount(1 + integerTolerance * 2), 2);
+  assert.equal(precision.roundMachineCount(3.44), 3);
+  assert.equal(precision.roundMachineCount(3.56), 4);
+  assert.equal(precision.roundMachineCount(0), 0);
 
   const comparisonTolerance = precision.getMachineCountComparisonTolerance(0, 0);
   assert.equal(precision.hasMeaningfulMachineCountDifference(0, comparisonTolerance * 0.99), false);
   assert.equal(precision.hasMeaningfulMachineCountDifference(0, comparisonTolerance), false);
   assert.equal(precision.hasMeaningfulMachineCountDifference(0, comparisonTolerance * 1.01), true);
+});
+
+test('whole-machine optimization is explicit and reaches the native ratio payload', () => {
+  const wholeConfiguration = optimizationConfig.getDefaultOptimizationConfiguration('ratios');
+  const continuousConfiguration = optimizationConfig.sanitizeOptimizationConfiguration({
+    ...wholeConfiguration,
+    machineCountBasis: 'continuous',
+  });
+  const node = {
+    id: 'rounded-target',
+    currentMachineCount: 1,
+    minimumMachineCount: 0,
+    maximumMachineCount: null,
+    isTarget: true,
+    powerUse: 1,
+    pollution: 0,
+    machineCost: 1,
+    machineCostIndependentOfMachineCount: 0,
+    hasInfiniteMachineCost: false,
+    modelCount: 1,
+    modelCountIndependentOfMachineCount: 0,
+    machineSpace: 1,
+    machineSpaceIndependentOfMachineCount: 0,
+    inputs: [],
+    outputs: [{ productId: 'product:test', quantity: 1, hasSinkConnection: false }],
+  };
+
+  assert.equal(optimizationConfig.validateOptimizationConfiguration(wholeConfiguration).backend, 'scip_milp');
+  assert.equal(
+    optimizationConfig.validateOptimizationConfiguration(continuousConfiguration).backend,
+    'soplex_lp',
+  );
+  assert.equal(
+    ratioOptimizerWorker.buildNativeRatioPayloadArray([node], [], undefined, wholeConfiguration)[9],
+    1,
+  );
+  assert.equal(
+    ratioOptimizerWorker.buildNativeRatioPayloadArray([node], [], undefined, continuousConfiguration)[9],
+    0,
+  );
 });

@@ -289,7 +289,7 @@ const BASE_HELP_ARTICLES: HelpArticle[] = [
         items: [
           'The solver first reduces connected-input shortages, then excess sent to sinks.',
           'After that, it compares the metrics you enable. Lower priority numbers are considered first; Importance weights metrics at the same priority.',
-          'Count full machines rounds up machine counts for cost, space, and model count. Leaving it off is faster but can understate those totals.',
+          'Dynamic whole-machine rounding recalculates connected suppliers and consumers when a machine count rounds up. Leaving it off keeps fractional ratios and solves faster.',
           'Adjust machine counts starts with Power Use and Produced Pollution. Complete production starts with Machine Space and Machine Model Count, using fractional machines.',
         ],
       },

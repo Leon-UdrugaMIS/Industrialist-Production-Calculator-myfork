@@ -258,15 +258,10 @@ export function validateOptimizationConfiguration(
     }
   }
 
-  const needsRoundedModel = enabled.some(
-    (id) => OPTIMIZATION_METRIC_DEFINITIONS[id].rounded && configuration.metrics[id].weight > 0,
-  );
-
   return {
     valid: errors.length === 0,
     errors: Array.from(new Set(errors)),
     warnings: Array.from(new Set(warnings)),
-    backend:
-      configuration.machineCountBasis === 'whole' && needsRoundedModel ? 'scip_milp' : 'soplex_lp',
+    backend: configuration.machineCountBasis === 'whole' ? 'scip_milp' : 'soplex_lp',
   };
 }

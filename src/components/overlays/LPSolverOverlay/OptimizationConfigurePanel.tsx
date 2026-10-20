@@ -31,8 +31,7 @@ function getSolveImpact(configuration: OptimizationConfiguration): {
   const wholeMachinePriorityLevels = new Set(
     wholeMachineMetrics.map((id) => configuration.metrics[id].tier),
   ).size;
-  const usesWholeMachineObjectives =
-    wholeMachineMetrics.length > 0 && configuration.machineCountBasis === 'whole';
+  const usesWholeMachineObjectives = configuration.machineCountBasis === 'whole';
   const hasRepeatedWholeMachineSearch = wholeMachinePriorityLevels > 1;
 
   if (configuration.mode === 'autocomplete' && usesWholeMachineObjectives) {
@@ -82,7 +81,7 @@ function getSolveImpact(configuration: OptimizationConfiguration): {
       method: 'Current recipes with whole machines',
       priorityLevels,
       description:
-        'The recipes stay as they are. Exact cost, space, or model counts require comparing whole-machine combinations.',
+        'The recipes stay as they are. Whole-machine dependency recalculation requires comparing integer combinations.',
     };
   }
   return {
@@ -115,10 +114,6 @@ export function OptimizationConfigurePanel({ onClose, onStart }: OptimizationCon
   };
   const validation = validateOptimizationConfiguration(configuration);
   const solveImpact = getSolveImpact(configuration);
-  const hasCountBasedObjective = metricOrder.some(
-    (id) => metrics[id].enabled && OPTIMIZATION_METRIC_DEFINITIONS[id].rounded,
-  );
-
   return (
     <div className={styles['configure-container']}>
       <div className={styles['modal-header']}>
@@ -213,29 +208,29 @@ export function OptimizationConfigurePanel({ onClose, onStart }: OptimizationCon
           })}
         </div>
 
-        {hasCountBasedObjective && (
-          <section className={styles['machine-accounting-option']}>
-            <label>
-              <input
-                type="checkbox"
-                checked={machineCountBasis === 'whole'}
-                onChange={(event) =>
-                  setMachineCountBasis(event.target.checked ? 'whole' : 'continuous')
-                }
-              />
-              <span>
-                <strong>Count whole machines</strong>
-                <small>Round up counts for cost, space, and machine model count.</small>
-              </span>
-            </label>
-            {machineCountBasis === 'continuous' && (
-              <p>
-                Fractional counts solve faster, but can understate the whole-machine totals shown on
-                the dashboard.
-              </p>
-            )}
-          </section>
-        )}
+        <section className={styles['machine-accounting-option']}>
+          <label>
+            <input
+              type="checkbox"
+              checked={machineCountBasis === 'whole'}
+              onChange={(event) =>
+                setMachineCountBasis(event.target.checked ? 'whole' : 'continuous')
+              }
+            />
+            <span>
+              <strong>Use dynamic whole-machine rounding</strong>
+              <small>
+                Recalculate connected suppliers and consumers when a machine count rounds up.
+              </small>
+            </span>
+          </label>
+          {machineCountBasis === 'continuous' && (
+            <p>
+              Fractional counts solve faster, but the result can require partial machines and does
+              not guarantee a buildable whole-machine chain.
+            </p>
+          )}
+        </section>
 
         <section className={styles['solver-impact']} data-backend={validation.backend}>
           <div>

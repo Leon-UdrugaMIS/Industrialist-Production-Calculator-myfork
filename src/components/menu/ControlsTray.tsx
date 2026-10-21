@@ -7,7 +7,6 @@ import {
   Network,
   Cpu,
   ArrowUp,
-  ArrowDown,
   Sparkles,
   FlaskConical,
   Clock,
@@ -90,13 +89,6 @@ const BUTTONS: ButtonConfig[] = [
     label: 'Round Up',
     type: 'action',
     Icon: ArrowUp,
-    dividerBottom: true,
-  },
-  {
-    id: 'round_down',
-    label: 'Round Down',
-    type: 'action',
-    Icon: ArrowDown,
     dividerBottom: true,
   },
   {
@@ -227,9 +219,8 @@ export function ControlsTray() {
       }
       useUIStore.getState().setIsLPSolverOpen(true);
       completeTutorialAction({ type: 'control', id: 'compute' });
-    } else if (btn.id === 'round_up' || btn.id === 'round_down') {
+    } else if (btn.id === 'round_up') {
       const flowStore = useFlowStore.getState();
-      const direction = btn.id === 'round_up' ? 'up' : 'down';
       flowStore.runTransaction(() => {
         for (const node of flowStore.nodes) {
           if (!isRecipeNode(node)) continue;
@@ -237,7 +228,7 @@ export function ControlsTray() {
           if (constraint?.kind === 'locked') continue;
 
           const currentCount = node.data.machineCount;
-          let roundedCount = roundMachineCount(currentCount, direction);
+          let roundedCount = roundMachineCount(currentCount);
           if (constraint?.kind === 'capped') {
             const maximumWholeCount = Math.floor(constraint.value);
             if (currentCount > 0 && maximumWholeCount < 1) continue;
@@ -248,7 +239,7 @@ export function ControlsTray() {
           }
         }
       });
-      completeTutorialAction({ type: 'control', id: 'round_machines' });
+      completeTutorialAction({ type: 'control', id: 'round_up' });
     } else if (btn.id === 'coming_soon') {
       void useUIStore.getState().confirm({
         title: 'Coming Soon',
@@ -338,8 +329,7 @@ export function ControlsTray() {
             const isHistoryDisabled =
               (btn.id === 'undo' && !canUndo) || (btn.id === 'redo' && !canRedo);
             const isLayoutDisabled = btn.id === 'layout' && (isLayouting || nodeCount === 0);
-            const isRoundMachinesDisabled =
-              (btn.id === 'round_up' || btn.id === 'round_down') && recipeNodeCount === 0;
+            const isRoundMachinesDisabled = btn.id === 'round_up' && recipeNodeCount === 0;
             const isAddGroupDisabled =
               btn.id === 'add_recipe' && isAddGroupMode && !hasGroupableSelection;
             const isDisabled =

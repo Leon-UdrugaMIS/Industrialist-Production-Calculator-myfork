@@ -19,8 +19,13 @@ const ALIAS_MAP: Record<string, string> = {
 
 export const ASSET_VERSION = import.meta.env.VITE_ICON_VERSION || 'dev';
 
+function withBasePath(path: string): string {
+  const basePath = import.meta.env.BASE_URL || '/';
+  return `${basePath.replace(/\/$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 function withAssetVersion(path: string): string {
-  return `${path}?v=${ASSET_VERSION}`;
+  return `${withBasePath(path)}?v=${ASSET_VERSION}`;
 }
 
 export const INDUS_LOGO_SRC = withAssetVersion('/induslogo.webp');

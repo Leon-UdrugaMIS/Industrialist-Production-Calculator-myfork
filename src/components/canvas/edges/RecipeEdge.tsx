@@ -9,6 +9,7 @@ import {
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { type EdgeControlPoint, type RecipeEdgeData } from '../../../types/edges';
+import { isGroupNode, isRecipeNode } from '../../../types/nodes';
 import { useEdgeThemeStore } from '../../../stores/useEdgeThemeStore';
 import { useFlowStore } from '../../../stores/useFlowStore';
 import { getEffectiveToggleId, useUIStore } from '../../../stores/useUIStore';
@@ -119,7 +120,22 @@ export function RecipeEdge({
   selected,
   data,
 }: EdgeProps<Edge<RecipeEdgeData>>) {
-  const lineStyle = useEdgeThemeStore((s) => s.lineStyle);
+  const globalLineStyle = useEdgeThemeStore((s) => s.lineStyle);
+  const groupLineStyle = useFlowStore((s) => {
+    const sourceNode = s.nodesMap.get(source);
+    const targetNode = s.nodesMap.get(target);
+    if (
+      !isRecipeNode(sourceNode) ||
+      !isRecipeNode(targetNode) ||
+      !sourceNode.data.groupId ||
+      sourceNode.data.groupId !== targetNode.data.groupId
+    ) {
+      return undefined;
+    }
+    const groupNode = s.nodesMap.get(sourceNode.data.groupId);
+    return isGroupNode(groupNode) ? groupNode.data.edgeLineStyle : undefined;
+  });
+  const lineStyle = groupLineStyle ?? globalLineStyle;
   const pathStyle = useEdgeThemeStore((s) => s.pathStyle);
   const { screenToFlowPosition } = useReactFlow();
 

@@ -6,6 +6,7 @@ import type {
   SavedRecipeNode,
 } from '../types/saves';
 import { isGameDifficulty } from '../types/globalSettings';
+import type { EdgeLineStyle } from '../stores/useEdgeThemeStore';
 
 export class SaveMigrationError extends Error {
   constructor(message: string) {
@@ -59,6 +60,7 @@ const GROUP_NODE_KEYS = [
   'id',
   'type',
   'label',
+  'edgeLineStyle',
   'collapsed',
   'handlesReady',
   'inputProxyHandleIds',
@@ -326,10 +328,21 @@ function normalizeNode(rawNode: unknown, index: number, version: number): SavedN
     if (typeof node.label !== 'string') fail(`${path}.label`, 'must be a string');
     const collapsed = requireBoolean(node.collapsed, `${path}.collapsed`);
     const handlesReady = optionalBoolean(node.handlesReady, `${path}.handlesReady`);
+    const rawEdgeLineStyle = node.edgeLineStyle;
+    if (
+      rawEdgeLineStyle !== undefined &&
+      rawEdgeLineStyle !== 'solid' &&
+      rawEdgeLineStyle !== 'dashed' &&
+      rawEdgeLineStyle !== 'dotted'
+    ) {
+      fail(`${path}.edgeLineStyle`, 'must be solid, dashed, or dotted');
+    }
+    const edgeLineStyle = rawEdgeLineStyle as EdgeLineStyle | undefined;
     return {
       id,
       type: 'group',
       label: node.label,
+      ...(edgeLineStyle === undefined ? {} : { edgeLineStyle }),
       collapsed,
       ...(handlesReady === undefined ? {} : { handlesReady }),
       inputProxyHandleIds: requireStringArray(

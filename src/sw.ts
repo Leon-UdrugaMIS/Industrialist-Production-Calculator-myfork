@@ -24,7 +24,10 @@ precacheAndRoute(self.__WB_MANIFEST, {
 });
 clientsClaim();
 
-const navigationHandler = createHandlerBoundToURL('/index.html');
+const appBasePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+const appPath = (path: string): string => `${appBasePath}/${path.replace(/^\/+/, '')}`;
+
+const navigationHandler = createHandlerBoundToURL(appPath('index.html'));
 registerRoute(
   new NavigationRoute(navigationHandler, {
     denylist: [/^\/api(?:\/|$|\?)/, /^\/scip\/THIRD_PARTY_LICENSES\.txt$/],
@@ -35,7 +38,7 @@ registerRoute(
   ({ request, sameOrigin, url }) =>
     sameOrigin &&
     request.destination === 'image' &&
-    (url.pathname.startsWith('/icons/') || url.pathname === '/induslogo.webp'),
+    (url.pathname.startsWith(appPath('icons/')) || url.pathname === appPath('induslogo.webp')),
   new StaleWhileRevalidate({
     cacheName: 'product-icons-v1',
     plugins: [
@@ -53,9 +56,16 @@ registerRoute(
 );
 
 registerRoute(
-  ({ sameOrigin, url }) => sameOrigin && /^\/scip\/scip\.(?:js|wasm)$/.test(url.pathname),
+  ({ sameOrigin, url }) => {
+    const scipPath = appPath('scip/');
+    return (
+      sameOrigin &&
+      url.pathname.startsWith(scipPath) &&
+      /^scip\.(?:js|wasm)$/.test(url.pathname.slice(scipPath.length))
+    );
+  },
   new CacheFirst({
-    cacheName: 'scip-runtime-v1',
+    cacheName: 'scip-runtime-v2',
     plugins: [
       new CacheableResponsePlugin({ statuses: [200] }),
       new ExpirationPlugin({ maxEntries: 4, purgeOnQuotaError: true }),

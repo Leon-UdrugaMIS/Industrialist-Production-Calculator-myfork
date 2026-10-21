@@ -38,6 +38,11 @@ The native bundle uses a shared precision policy for solver tolerances and
 whole-machine rounding. For the native model, payload, rebuild process, and
 smoke suite, see [`tools/scip-wasm/README.md`](tools/scip-wasm/README.md).
 
+Use **Multi-select** in the bottom controls to select recipe nodes, then choose
+**Add Group** to create a named selection box. Open the group's `...` control to
+rename it and choose a solid, dashed, or dotted style for its internal edges.
+Connections outside the group continue using the global edge style.
+
 ## Run locally
 
 Install the dependencies and start Vite from the repository root:

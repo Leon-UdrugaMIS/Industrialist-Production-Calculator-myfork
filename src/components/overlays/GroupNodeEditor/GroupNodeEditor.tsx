@@ -6,6 +6,7 @@ import type { Edge } from '@xyflow/react';
 import type { GroupNodeData, RecipeNodeType } from '../../../types/nodes';
 import { isRecipeNode } from '../../../types/nodes';
 import type { RateMode } from '../../../types/ui';
+import type { EdgeLineStyle } from '../../../stores/useEdgeThemeStore';
 import { getProductName, resolveActiveRecipe } from '../../../data/lookup';
 import { useFlowStore } from '../../../stores/useFlowStore';
 import { useFlowResultStore } from '../../../stores/useFlowResultStore';
@@ -176,6 +177,9 @@ export function GroupNodeEditor({ initialData, nodeId, onClose }: GroupNodeEdito
     })),
   );
   const [label, setLabel] = useState(initialData.label);
+  const [edgeLineStyle, setEdgeLineStyle] = useState<EdgeLineStyle | 'global'>(
+    initialData.edgeLineStyle ?? 'global',
+  );
   const [inputProxyHandleIds, setInputProxyHandleIds] = useState(initialData.inputProxyHandleIds);
   const [outputProxyHandleIds, setOutputProxyHandleIds] = useState(
     initialData.outputProxyHandleIds,
@@ -199,6 +203,7 @@ export function GroupNodeEditor({ initialData, nodeId, onClose }: GroupNodeEdito
   const handleApply = () => {
     updateGroupNodeData(nodeId, {
       label: label.trim() || 'Group',
+      edgeLineStyle: edgeLineStyle === 'global' ? undefined : edgeLineStyle,
       ...(initialData.collapsed
         ? {
             inputProxyHandleIds,
@@ -230,6 +235,19 @@ export function GroupNodeEditor({ initialData, nodeId, onClose }: GroupNodeEdito
               onChange={(e) => setLabel(e.target.value)}
               className={styles['node-editor-input']}
             />
+          </div>
+          <div className={styles['node-editor-group']}>
+            <label>Internal Line Style</label>
+            <select
+              value={edgeLineStyle}
+              onChange={(event) => setEdgeLineStyle(event.target.value as EdgeLineStyle | 'global')}
+              className={styles['node-editor-input']}
+            >
+              <option value="global">Use global style</option>
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
           </div>
 
           {initialData.collapsed && (

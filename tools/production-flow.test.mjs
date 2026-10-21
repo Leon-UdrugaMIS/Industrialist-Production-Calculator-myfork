@@ -494,10 +494,8 @@ test('precision utilities preserve their zero, rate, deficit, excess, and machin
   assert.equal(precision.isMachineCountNearInteger(1 + integerTolerance * 2), false);
   assert.equal(precision.ceilMachineCount(1 + integerTolerance), 1);
   assert.equal(precision.ceilMachineCount(1 + integerTolerance * 2), 2);
-  assert.equal(precision.roundMachineCount(3.44, 'down'), 3);
-  assert.equal(precision.roundMachineCount(3.44, 'up'), 4);
-  assert.equal(precision.roundMachineCount(0.44, 'down'), 1);
-  assert.equal(precision.roundMachineCount(0.44, 'up'), 1);
+  assert.equal(precision.roundMachineCount(3.44), 4);
+  assert.equal(precision.roundMachineCount(0.44), 1);
   assert.equal(precision.roundMachineCount(0), 0);
 
   const comparisonTolerance = precision.getMachineCountComparisonTolerance(0, 0);

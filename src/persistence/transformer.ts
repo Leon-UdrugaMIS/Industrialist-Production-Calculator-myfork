@@ -193,6 +193,7 @@ export function serializeCanvas(
         id: n.id,
         type: 'group',
         label: n.data.label,
+        edgeLineStyle: n.data.edgeLineStyle,
         collapsed: n.data.collapsed,
         inputProxyHandleIds: n.data.inputProxyHandleIds,
         outputProxyHandleIds: n.data.outputProxyHandleIds,
@@ -272,6 +273,7 @@ export function deserializeCanvas(
         position: savedNode.position,
         data: {
           label: savedNode.label,
+          edgeLineStyle: savedNode.edgeLineStyle,
           collapsed: savedNode.collapsed,
           handlesReady: false,
           inputProxyHandleIds: savedNode.inputProxyHandleIds,

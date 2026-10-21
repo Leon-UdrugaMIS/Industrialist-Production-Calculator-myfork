@@ -5,6 +5,11 @@ export type ScipBundlePath = typeof DEFAULT_SCIP_BUNDLE_PATH;
 const SCIP_BUNDLE_CACHE_VERSION =
   '2026-10-04-native-abi4-produced-pollution-flow-status-tolerance-4';
 
+function withBasePath(path: string): string {
+  const basePath = import.meta.env.BASE_URL || '/';
+  return `${basePath.replace(/\/$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 export function normalizeScipBundlePath(value: unknown): ScipBundlePath {
   if (typeof value === 'string' && value.trim().replace(/^\/+|\/+$/g, '') === 'scip') {
     return DEFAULT_SCIP_BUNDLE_PATH;
@@ -26,7 +31,7 @@ export function getScipAssetPath(
     params.set('v', version);
   }
   params.set('scipv', SCIP_BUNDLE_CACHE_VERSION);
-  return `/${bundlePath}/${fileName}?${params.toString()}`;
+  return withBasePath(`/${bundlePath}/${fileName}`) + `?${params.toString()}`;
 }
 
 export function getScipAssetUrl(
@@ -35,5 +40,5 @@ export function getScipAssetUrl(
   bundlePath: ScipBundlePath,
   version?: string,
 ): string {
-  return `${origin}${getScipAssetPath(fileName, bundlePath, version)}`;
+  return new URL(getScipAssetPath(fileName, bundlePath, version), `${origin}/`).href;
 }

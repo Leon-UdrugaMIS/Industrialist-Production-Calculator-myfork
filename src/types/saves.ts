@@ -1,4 +1,5 @@
 import type { MachineCountConstraint } from './nodes';
+import type { EdgeLineStyle } from '../stores/useEdgeThemeStore';
 import type { GameDifficulty, GameMonth } from './globalSettings';
 
 export interface SavedRecipeNode {
@@ -20,6 +21,7 @@ export interface SavedGroupNode {
   id: string;
   type: 'group';
   label: string;
+  edgeLineStyle?: EdgeLineStyle;
   collapsed: boolean;
   handlesReady?: boolean;
   inputProxyHandleIds: string[];

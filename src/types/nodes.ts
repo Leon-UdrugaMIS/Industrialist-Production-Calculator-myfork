@@ -1,4 +1,5 @@
 import { type Node } from '@xyflow/react';
+import type { EdgeLineStyle } from '../stores/useEdgeThemeStore';
 
 export type HandleRef = {
   side: 'input' | 'output';
@@ -26,6 +27,7 @@ export type RecipeNodeData = {
 
 export type GroupNodeData = {
   label: string;
+  edgeLineStyle?: EdgeLineStyle;
   collapsed: boolean;
   handlesReady?: boolean;
   inputProxyHandleIds: string[];

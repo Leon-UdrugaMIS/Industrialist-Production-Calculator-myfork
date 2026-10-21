@@ -6,7 +6,8 @@ import {
   Target,
   Network,
   Cpu,
-  Hash,
+  ArrowUp,
+  ArrowDown,
   Sparkles,
   FlaskConical,
   Clock,
@@ -85,10 +86,17 @@ const BUTTONS: ButtonConfig[] = [
     dividerBottom: true,
   },
   {
-    id: 'round_machines',
-    label: 'Round Machines',
+    id: 'round_up',
+    label: 'Round Up',
     type: 'action',
-    Icon: Hash,
+    Icon: ArrowUp,
+    dividerBottom: true,
+  },
+  {
+    id: 'round_down',
+    label: 'Round Down',
+    type: 'action',
+    Icon: ArrowDown,
     dividerBottom: true,
   },
   {
@@ -219,19 +227,23 @@ export function ControlsTray() {
       }
       useUIStore.getState().setIsLPSolverOpen(true);
       completeTutorialAction({ type: 'control', id: 'compute' });
-    } else if (btn.id === 'round_machines') {
+    } else if (btn.id === 'round_up' || btn.id === 'round_down') {
       const flowStore = useFlowStore.getState();
+      const direction = btn.id === 'round_up' ? 'up' : 'down';
       flowStore.runTransaction(() => {
         for (const node of flowStore.nodes) {
           if (!isRecipeNode(node)) continue;
           const constraint = sanitizeMachineCountConstraint(node.data.machineCountConstraint);
           if (constraint?.kind === 'locked') continue;
 
-          let roundedCount = roundMachineCount(node.data.machineCount);
+          const currentCount = node.data.machineCount;
+          let roundedCount = roundMachineCount(currentCount, direction);
           if (constraint?.kind === 'capped') {
-            roundedCount = Math.min(roundedCount, Math.floor(constraint.value));
+            const maximumWholeCount = Math.floor(constraint.value);
+            if (currentCount > 0 && maximumWholeCount < 1) continue;
+            roundedCount = Math.min(roundedCount, maximumWholeCount);
           }
-          if (roundedCount !== node.data.machineCount) {
+          if (roundedCount !== currentCount) {
             flowStore.updateNodeData(node.id, { machineCount: roundedCount });
           }
         }
@@ -326,7 +338,8 @@ export function ControlsTray() {
             const isHistoryDisabled =
               (btn.id === 'undo' && !canUndo) || (btn.id === 'redo' && !canRedo);
             const isLayoutDisabled = btn.id === 'layout' && (isLayouting || nodeCount === 0);
-            const isRoundMachinesDisabled = btn.id === 'round_machines' && recipeNodeCount === 0;
+            const isRoundMachinesDisabled =
+              (btn.id === 'round_up' || btn.id === 'round_down') && recipeNodeCount === 0;
             const isAddGroupDisabled =
               btn.id === 'add_recipe' && isAddGroupMode && !hasGroupableSelection;
             const isDisabled =

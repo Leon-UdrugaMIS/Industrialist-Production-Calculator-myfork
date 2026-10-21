@@ -49,6 +49,19 @@ npm install
 npm run dev
 ```
 
+Open the development app at <http://localhost:5173/>. To test the production
+build on your computer instead, run:
+
+```sh
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
+```
+
+Then open <http://localhost:4173/>. Keep the terminal running while using the
+app. Stop either server with `Ctrl+C`. On another device on the same network,
+start the server with `--host 0.0.0.0` and open the computer's local IP address
+with the selected port, after allowing that port through the firewall if asked.
+
 Available scripts:
 
 ```sh

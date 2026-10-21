@@ -92,9 +92,11 @@ export function ceilMachineCount(value: number): number {
   return Math.ceil(value);
 }
 
-export function roundMachineCount(value: number): number {
+export type MachineCountRoundingDirection = 'up' | 'down';
+
+export function roundMachineCount(value: number, direction: MachineCountRoundingDirection): number {
   if (!Number.isFinite(value) || value <= RATE_NUMERICAL_ZERO) return 0;
-  return Math.max(0, Math.round(value));
+  return direction === 'up' ? Math.ceil(value) : Math.max(1, Math.floor(value));
 }
 
 export function getScaledTolerance(
